@@ -19,6 +19,7 @@ from constants import (
     HEAD_FORWARD_CONFIDENCE_THRESHOLD,
     HEAD_POSE_IDS,
     LEFT_EYE,
+    NO_FACE_FRAME_LIMIT,
     RIGHT_EYE,
     ROLLING_WINDOW_SIZE,
     SMOOTHED_DIRECTION_CONFIRMATION,
@@ -211,7 +212,7 @@ def confidence_from_window(values):
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=False,
-    max_num_faces=1,
+    max_num_faces=2,
     refine_landmarks=True,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5,
@@ -248,6 +249,11 @@ head_state = {"last": None, "history": deque(maxlen=5)}
 direction_state = {"last": "Looking On Screen", "confidence": 100}
 head_direction_state = {"last": "Head Forward", "confidence": 100}
 distraction_counter = 0
+no_face_counter = 0
+interview_integrity = True
+last_gaze_direction = direction_state["last"]
+last_head_direction = head_direction_state["last"]
+last_attention_score = 0
 
 
 while True:
@@ -265,8 +271,11 @@ while True:
 
     calibration_status = f"Calibration: {active_phase(calibration).title()}" if not calibration["ready"] else "Calibration: Ready"
     gaze_model = gaze_model_from_calibration(calibration)
+    face_count = len(results.multi_face_landmarks) if results.multi_face_landmarks else 0
 
-    if results.multi_face_landmarks:
+    if face_count == 1:
+        no_face_counter = 0
+        interview_integrity = True
         face_landmarks = results.multi_face_landmarks[0]
         landmarks = extract_landmarks(face_landmarks, width, height)
         cv2.putText(frame, "Face Detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -394,6 +403,9 @@ while True:
         )
         attention_history.append(attention_score)
         stable_attention = int(round(rolling_mean(attention_history, attention_score)))
+        last_gaze_direction = gaze_result["direction"]
+        last_head_direction = head_direction
+        last_attention_score = stable_attention
 
         for index in HEAD_POSE_IDS:
             cv2.circle(frame, point_int(landmarks[index]), 3, (255, 0, 255), -1)
@@ -440,9 +452,26 @@ while True:
         gain_text = f"PnP: {head_pose.get('pnp_success', False)}  Reproj: {head_pose.get('reprojection_error', 0.0):.2f}  Tracking: {tracking_quality:.1f}"
         cv2.putText(frame, gain_text, (20, 538), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
+    elif face_count > 1:
+        no_face_counter = 0
+        interview_integrity = False
+        cv2.putText(frame, "Multiple Faces Detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        cv2.putText(frame, "Integrity: Failed", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.putText(frame, f"Last Gaze: {last_gaze_direction}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Last Head: {last_head_direction}", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Attention: {last_attention_score}%", (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
     else:
-        cv2.putText(frame, "No Face Detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        no_face_counter += 1
+        if no_face_counter >= NO_FACE_FRAME_LIMIT:
+            interview_integrity = False
+            cv2.putText(frame, "Candidate Left Camera", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        else:
+            cv2.putText(frame, "Face Lost...", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
         cv2.putText(frame, "Calibration Paused", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        cv2.putText(frame, f"Last Gaze: {last_gaze_direction}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Last Head: {last_head_direction}", (20, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, f"Attention: {last_attention_score}%", (20, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
     now = time.perf_counter()
     fps = 1.0 / max(now - last_frame_time, 1e-6)
