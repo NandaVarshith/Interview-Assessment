@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowRight,
@@ -2024,13 +2024,52 @@ const mockCandidateDefaults = {
   resumeScore: 88,
   estimatedWait: '01:30',
 }
-const mockCheckSequence = [
-  { key: 'camera', label: 'Camera permission', detail: 'Camera preview active', icon: Video },
-  { key: 'microphone', label: 'Microphone check', detail: 'Voice input detected', icon: Waves },
-  { key: 'permissions', label: 'Permission status', detail: 'Browser permissions granted', icon: CheckCircle2 },
-  { key: 'internet', label: 'Internet status', detail: 'Stable connection', icon: Network },
-  { key: 'face', label: 'Face detected', detail: 'Single face centered', icon: ScanFace },
-  { key: 'lighting', label: 'Lighting indicator', detail: 'Lighting quality accepted', icon: Eye },
+const candidateStorageKey = 'ai-interview-candidate'
+const saveCandidateForDevelopment = (candidate) => {
+  const candidateForStorage = {
+    name: candidate.name,
+    email: candidate.email,
+    role: candidate.role,
+    sessionId: candidate.sessionId,
+    resumeScore: candidate.resumeScore,
+    estimatedWait: candidate.estimatedWait,
+    resumeName: candidate.resumeName,
+    resumeSize: candidate.resumeSize,
+    resumeType: candidate.resumeType,
+    savedAt: candidate.savedAt,
+  }
+  window.localStorage.setItem(candidateStorageKey, JSON.stringify(candidateForStorage))
+}
+const validateCandidateForm = ({ name, email, resume }) => {
+  const errors = {}
+  const trimmedName = name.trim()
+  const trimmedEmail = email.trim()
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!trimmedName) {
+    errors.name = 'Full name is required.'
+  } else if (trimmedName.split(/\s+/).length < 2) {
+    errors.name = 'Enter first and last name.'
+  }
+  if (!trimmedEmail) {
+    errors.email = 'Email is required.'
+  } else if (!emailPattern.test(trimmedEmail)) {
+    errors.email = 'Enter a valid email address.'
+  }
+  if (!resume) {
+    errors.resume = 'Upload a PDF, DOC, or DOCX resume.'
+  }
+  return errors
+}
+const systemCheckItems = [
+  { key: 'camera', label: 'Camera permission', success: 'Camera permission granted', icon: Video },
+  { key: 'preview', label: 'Camera preview active', success: 'Live camera preview is active', icon: Video },
+  { key: 'microphone', label: 'Microphone permission', success: 'Microphone permission granted', icon: Waves },
+  { key: 'audioInput', label: 'Microphone check', success: 'Audio input stream is available', icon: Waves },
+  { key: 'permissions', label: 'Browser permissions', success: 'Browser granted requested media permissions', icon: CheckCircle2 },
+  { key: 'internet', label: 'Internet status', success: 'Browser reports online status', icon: Network },
+  { key: 'face', label: 'Face detected', success: 'Face detection available', icon: ScanFace },
+  { key: 'singleFace', label: 'Single face centered', success: 'Single-face detection available', icon: ScanFace },
+  { key: 'lighting', label: 'Lighting indicator', success: 'Lighting check available', icon: Eye },
 ]
 const interviewQuestions = [
   'Walk me through the most technically challenging project on your resume.',
@@ -2233,7 +2272,9 @@ function PortalCard({ eyebrow, title, description, children }) {
 }
 function CandidateLogin({ onStart }) {
   const [form, setForm] = useState({ name: '', email: '', resume: null })
-  const canStart = form.name.trim() && form.email.trim() && form.resume
+  const [errors, setErrors] = useState({})
+  const validationErrors = validateCandidateForm(form)
+  const canStart = Object.keys(validationErrors).length === 0
   return (
     <PortalCard
       eyebrow="Step 01"
@@ -2244,33 +2285,53 @@ function CandidateLogin({ onStart }) {
         className="grid gap-5"
         onSubmit={(event) => {
           event.preventDefault()
-          if (!canStart) return
-          onStart({
+          const nextErrors = validateCandidateForm(form)
+          setErrors(nextErrors)
+          if (Object.keys(nextErrors).length > 0) return
+          const nextCandidate = {
             ...mockCandidateDefaults,
             name: form.name.trim(),
             email: form.email.trim(),
             resumeName: form.resume.name,
-          })
+            resumeSize: form.resume.size,
+            resumeType: form.resume.type || 'application/octet-stream',
+            resumeFile: form.resume,
+            savedAt: new Date().toISOString(),
+          }
+          saveCandidateForDevelopment(nextCandidate)
+          onStart(nextCandidate)
         }}
       >
         <label className="grid gap-2">
           <span className="text-sm font-black text-slate-200">Name</span>
           <input
-            className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-4 focus:ring-cyan-300/10"
+            className={`h-12 rounded-xl border bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-4 focus:ring-cyan-300/10 ${
+              errors.name ? 'border-rose-300/50' : 'border-white/10'
+            }`}
             placeholder="Enter full name"
             value={form.name}
-            onChange={(event) => setForm((value) => ({ ...value, name: event.target.value }))}
+            onChange={(event) => {
+              setForm((value) => ({ ...value, name: event.target.value }))
+              setErrors((value) => ({ ...value, name: undefined }))
+            }}
           />
+          {errors.name && <span className="text-xs font-semibold text-rose-300">{errors.name}</span>}
         </label>
         <label className="grid gap-2">
           <span className="text-sm font-black text-slate-200">Email</span>
           <input
             type="email"
-            className="h-12 rounded-xl border border-white/10 bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-4 focus:ring-cyan-300/10"
+            className={`h-12 rounded-xl border bg-slate-950/70 px-4 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-300/50 focus:ring-4 focus:ring-cyan-300/10 ${
+              errors.email ? 'border-rose-300/50' : 'border-white/10'
+            }`}
             placeholder="candidate@example.com"
             value={form.email}
-            onChange={(event) => setForm((value) => ({ ...value, email: event.target.value }))}
+            onChange={(event) => {
+              setForm((value) => ({ ...value, email: event.target.value }))
+              setErrors((value) => ({ ...value, email: undefined }))
+            }}
           />
+          {errors.email && <span className="text-xs font-semibold text-rose-300">{errors.email}</span>}
         </label>
         <label className="group grid cursor-pointer gap-2">
           <span className="text-sm font-black text-slate-200">Resume Upload</span>
@@ -2278,21 +2339,27 @@ function CandidateLogin({ onStart }) {
             type="file"
             className="sr-only"
             accept=".pdf,.doc,.docx"
-            onChange={(event) =>
+            onChange={(event) => {
               setForm((value) => ({ ...value, resume: event.target.files?.[0] ?? null }))
-            }
+              setErrors((value) => ({ ...value, resume: undefined }))
+            }}
           />
-          <span className="flex min-h-36 items-center justify-center rounded-2xl border border-dashed border-cyan-300/30 bg-cyan-300/5 p-6 text-center transition group-hover:bg-cyan-300/10">
+          <span
+            className={`flex min-h-36 items-center justify-center rounded-2xl border border-dashed bg-cyan-300/5 p-6 text-center transition group-hover:bg-cyan-300/10 ${
+              errors.resume ? 'border-rose-300/50' : 'border-cyan-300/30'
+            }`}
+          >
             <span>
               <UploadCloud className="mx-auto text-cyan-200" size={30} />
               <span className="mt-3 block text-sm font-black text-white">
                 {form.resume ? form.resume.name : 'Upload PDF, DOC, or DOCX resume'}
               </span>
               <span className="mt-1 block text-xs font-semibold text-slate-500">
-                Mock upload only. No backend storage is used.
+                Stored locally for this development session.
               </span>
             </span>
           </span>
+          {errors.resume && <span className="text-xs font-semibold text-rose-300">{errors.resume}</span>}
         </label>
         <Button
           type="submit"
@@ -2306,26 +2373,46 @@ function CandidateLogin({ onStart }) {
     </PortalCard>
   )
 }
-function CameraPreviewMock({ checks }) {
+function CameraPreview({ stream, checks, microphoneLevel }) {
+  const videoRef = useRef(null)
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream
+    }
+  }, [stream])
+  const previewActive = checks.preview.status === 'passed'
   return (
     <div className="relative min-h-80 overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827)]">
       <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-xs font-black text-white backdrop-blur">
-        <span className={`h-2 w-2 rounded-full ${checks.camera ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+        <span className={`h-2 w-2 rounded-full ${previewActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         Camera preview
       </div>
-      <div className="absolute inset-x-8 top-14 h-48 rounded-[44%] border border-cyan-200/20 bg-white/7 shadow-[inset_0_0_60px_rgba(34,211,238,0.06)]" />
-      <div className="absolute left-1/2 top-24 h-24 w-24 -translate-x-1/2 rounded-full border border-cyan-200/20 bg-slate-300/10" />
-      <div className="absolute bottom-8 left-1/2 h-28 w-44 -translate-x-1/2 rounded-t-[4rem] border border-cyan-200/20 bg-slate-300/10" />
+      {stream ? (
+        <video
+          ref={videoRef}
+          className="h-full min-h-80 w-full object-cover"
+          autoPlay
+          muted
+          playsInline
+          aria-label="Live camera preview"
+        />
+      ) : (
+        <>
+          <div className="absolute inset-x-8 top-14 h-48 rounded-[44%] border border-cyan-200/20 bg-white/7 shadow-[inset_0_0_60px_rgba(34,211,238,0.06)]" />
+          <div className="absolute left-1/2 top-24 h-24 w-24 -translate-x-1/2 rounded-full border border-cyan-200/20 bg-slate-300/10" />
+          <div className="absolute bottom-8 left-1/2 h-28 w-44 -translate-x-1/2 rounded-t-[4rem] border border-cyan-200/20 bg-slate-300/10" />
+        </>
+      )}
       <div className="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2">
         {[
-          ['Face', checks.face],
-          ['Light', checks.lighting],
-          ['Audio', checks.microphone],
-        ].map(([label, passed]) => (
+          ['Face', checks.face.status === 'passed' ? 'Passed' : 'Unavailable', checks.face.status],
+          ['Light', checks.lighting.status === 'passed' ? 'Passed' : 'Unavailable', checks.lighting.status],
+          ['Audio', `${microphoneLevel}%`, checks.audioInput.status],
+        ].map(([label, value, status]) => (
           <div key={label} className="rounded-xl bg-white/10 px-3 py-2 text-center backdrop-blur">
             <p className="text-xs font-black text-white">{label}</p>
-            <p className={`mt-1 text-[11px] font-bold ${passed ? 'text-emerald-300' : 'text-amber-300'}`}>
-              {passed ? 'Passed' : 'Checking'}
+            <p className={`mt-1 text-[11px] font-bold ${status === 'passed' ? 'text-emerald-300' : 'text-amber-300'}`}>
+              {value}
             </p>
           </div>
         ))}
@@ -2334,36 +2421,150 @@ function CameraPreviewMock({ checks }) {
   )
 }
 function SystemCheck({ candidate, onContinue }) {
-  const [checks, setChecks] = useState({
-    camera: false,
-    microphone: false,
-    permissions: false,
-    internet: false,
-    face: false,
-    lighting: false,
-  })
-  useEffect(() => {
-    const timers = mockCheckSequence.map((check, index) =>
-      window.setTimeout(() => {
-        setChecks((value) => ({ ...value, [check.key]: true }))
-      }, 500 + index * 420),
+  const createInitialChecks = () =>
+    Object.fromEntries(
+      systemCheckItems.map((check) => [
+        check.key,
+        {
+          status: ['face', 'singleFace', 'lighting'].includes(check.key) ? 'unavailable' : 'pending',
+          detail: ['face', 'singleFace', 'lighting'].includes(check.key)
+            ? 'No existing browser/model dependency is configured for this check'
+            : 'Waiting for browser result',
+        },
+      ]),
     )
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  const [checks, setChecks] = useState({
+    ...createInitialChecks(),
+  })
+  const [cameraStream, setCameraStream] = useState(null)
+  const [microphoneLevel, setMicrophoneLevel] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    let animationFrame = 0
+    let audioContext = null
+    const activeStreams = []
+    const setCheck = (key, status, detail) => {
+      if (!cancelled) {
+        setChecks((value) => ({ ...value, [key]: { status, detail } }))
+      }
+    }
+    const updateConnection = () => {
+      const isOnline = window.navigator.onLine
+      setCheck(
+        'internet',
+        isOnline ? 'passed' : 'failed',
+        isOnline
+          ? 'Browser reports online; this does not guarantee connection stability'
+          : 'Browser reports offline',
+      )
+    }
+    const runMediaChecks = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const detail = 'This browser does not support media device access'
+        setCheck('camera', 'failed', detail)
+        setCheck('preview', 'failed', detail)
+        setCheck('microphone', 'failed', detail)
+        setCheck('audioInput', 'failed', detail)
+        setCheck('permissions', 'failed', detail)
+        return
+      }
+      let cameraGranted = false
+      let microphoneGranted = false
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        activeStreams.push(stream)
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        if (!cancelled) {
+          cameraGranted = stream.getVideoTracks().length > 0
+          setCameraStream(stream)
+          setCheck('camera', cameraGranted ? 'passed' : 'failed', cameraGranted ? 'Camera permission granted' : 'No camera video track was found')
+          setCheck(
+            'preview',
+            cameraGranted ? 'passed' : 'failed',
+            cameraGranted
+              ? 'Live camera stream is attached to the preview'
+              : 'No camera video track was found',
+          )
+        }
+      } catch (error) {
+        const detail = error?.name === 'NotAllowedError' ? 'Camera permission was denied' : 'Camera access failed'
+        setCheck('camera', 'failed', detail)
+        setCheck('preview', 'failed', detail)
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        activeStreams.push(stream)
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop())
+          return
+        }
+        const hasAudioTrack = stream.getAudioTracks().length > 0
+        microphoneGranted = hasAudioTrack
+        setCheck('microphone', hasAudioTrack ? 'passed' : 'failed', hasAudioTrack ? 'Microphone permission granted' : 'No microphone audio track was found')
+        setCheck('audioInput', hasAudioTrack ? 'passed' : 'failed', hasAudioTrack ? 'Audio input stream is available' : 'No audio input stream is available')
+        if (hasAudioTrack) {
+          audioContext = new AudioContext()
+          const analyser = audioContext.createAnalyser()
+          const source = audioContext.createMediaStreamSource(stream)
+          const samples = new Uint8Array(analyser.frequencyBinCount)
+          source.connect(analyser)
+          const readLevel = () => {
+            analyser.getByteTimeDomainData(samples)
+            const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample - 128)), 0)
+            setMicrophoneLevel(Math.min(100, Math.round((peak / 64) * 100)))
+            animationFrame = window.requestAnimationFrame(readLevel)
+          }
+          readLevel()
+        }
+      } catch (error) {
+        const detail = error?.name === 'NotAllowedError' ? 'Microphone permission was denied' : 'Microphone access failed'
+        setCheck('microphone', 'failed', detail)
+        setCheck('audioInput', 'failed', detail)
+      }
+      setCheck(
+        'permissions',
+        cameraGranted && microphoneGranted ? 'passed' : 'failed',
+        cameraGranted && microphoneGranted
+          ? 'Camera and microphone permissions were granted'
+          : 'One or more requested media permissions were not granted',
+      )
+    }
+    updateConnection()
+    window.addEventListener('online', updateConnection)
+    window.addEventListener('offline', updateConnection)
+    runMediaChecks()
+    return () => {
+      cancelled = true
+      window.removeEventListener('online', updateConnection)
+      window.removeEventListener('offline', updateConnection)
+      window.cancelAnimationFrame(animationFrame)
+      activeStreams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()))
+      if (audioContext) {
+        audioContext.close()
+      }
+    }
   }, [])
-  const allPassed = mockCheckSequence.every((check) => checks[check.key])
+  const requiredCheckKeys = ['camera', 'preview', 'microphone', 'audioInput', 'permissions', 'internet']
+  const allPassed = requiredCheckKeys.every((key) => checks[key].status === 'passed')
   return (
     <PortalCard
       eyebrow="Step 02"
       title="System Check"
-      description="The interview platform verifies device readiness using mocked camera, audio, permission, connection, face, and lighting signals."
+      description="The interview platform verifies available browser device signals before the assessment starts."
     >
       <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-        <CameraPreviewMock checks={checks} />
+        <CameraPreview stream={cameraStream} checks={checks} microphoneLevel={microphoneLevel} />
         <div className="grid content-between gap-4">
           <div className="space-y-3">
-            {mockCheckSequence.map((check) => {
+            {systemCheckItems.map((check) => {
               const Icon = check.icon
-              const passed = checks[check.key]
+              const current = checks[check.key]
+              const passed = current.status === 'passed'
+              const failed = current.status === 'failed'
+              const unavailable = current.status === 'unavailable'
               return (
                 <div
                   key={check.key}
@@ -2371,7 +2572,13 @@ function SystemCheck({ candidate, onContinue }) {
                 >
                   <span
                     className={`grid h-10 w-10 place-items-center rounded-xl ${
-                      passed ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'
+                      passed
+                        ? 'bg-emerald-400/15 text-emerald-300'
+                        : failed
+                          ? 'bg-rose-400/15 text-rose-300'
+                          : unavailable
+                            ? 'bg-slate-400/15 text-slate-400'
+                            : 'bg-amber-400/15 text-amber-300'
                     }`}
                   >
                     {passed ? <CheckCircle2 size={19} /> : <Icon size={19} />}
@@ -2379,10 +2586,20 @@ function SystemCheck({ candidate, onContinue }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-black text-white">{check.label}</p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      {passed ? check.detail : 'Running mock diagnostic'}
+                      {passed ? check.success : current.detail}
                     </p>
                   </div>
-                  <span className={`h-2.5 w-2.5 rounded-full ${passed ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      passed
+                        ? 'bg-emerald-400'
+                        : failed
+                          ? 'bg-rose-400'
+                          : unavailable
+                            ? 'bg-slate-500'
+                            : 'bg-amber-400 animate-pulse'
+                    }`}
+                  />
                 </div>
               )
             })}
