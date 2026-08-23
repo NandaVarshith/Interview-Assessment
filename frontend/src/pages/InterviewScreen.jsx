@@ -12,6 +12,7 @@ import {
   interviewEvaluationMetrics,
   transcriptSegments,
 } from '../data/appData'
+import { generateCrossQuestion, generateFollowUpQuestion } from '../services/interviewPreparation'
 
 function formatInterviewTime(seconds) {
   const minutes = Math.floor(seconds / 60)
@@ -25,6 +26,9 @@ function readSessionArray(key) {
   } catch {
     return []
   }
+}
+function readSessionString(key) {
+  return window.sessionStorage.getItem(key) || ''
 }
 function InterviewStatusPill({ icon: Icon, label, status, tone = 'emerald' }) {
   const toneClasses = {
@@ -41,7 +45,7 @@ function InterviewStatusPill({ icon: Icon, label, status, tone = 'emerald' }) {
     </div>
   )
 }
-function InterviewTopBar({ candidate, questionIndex, questionCount, progress, elapsedSeconds, onExit, onNextQuestion, onFinish }) {
+function InterviewTopBar({ candidate, questionIndex, questionCount, progress, elapsedSeconds, isFollowUp, isLoading, onExit, onNextQuestion, onFinish }) {
   return (
     <header className="border-b border-white/10 bg-slate-950/92 px-4 py-4 backdrop-blur-2xl lg:px-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -80,13 +84,14 @@ function InterviewTopBar({ candidate, questionIndex, questionCount, progress, el
           >
             Exit
           </Button>
-          {questionIndex < questionCount - 1 && (
+          {(!isFollowUp || questionIndex < questionCount - 1) && (
             <Button
               variant="secondary"
               className="border-white/10 bg-white/10 text-white hover:bg-white/15"
               onClick={onNextQuestion}
+              disabled={isLoading}
             >
-              Next Question
+              {isLoading ? 'Generating follow-up...' : 'Next Question'}
             </Button>
           )}
           <Button className="bg-cyan-400 text-slate-950 hover:bg-cyan-300" onClick={onFinish}>
@@ -97,7 +102,17 @@ function InterviewTopBar({ candidate, questionIndex, questionCount, progress, el
     </header>
   )
 }
-function AIInterviewerPanel({ interviewQuestions, questionIndex, elapsedSeconds }) {
+function AIInterviewerPanel({
+  interviewQuestions,
+  questionIndex,
+  followUpQuestion,
+  crossQuestion,
+  elapsedSeconds,
+  answer,
+  onAnswerChange,
+  followUpError,
+  answerDisabled,
+}) {
   return (
     <aside className="flex min-h-0 flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
@@ -119,8 +134,21 @@ function AIInterviewerPanel({ interviewQuestions, questionIndex, elapsedSeconds 
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Current Question</p>
         <h2 className="mt-3 text-xl font-black leading-8 tracking-tight text-white">
-          {interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'}
+          {crossQuestion || followUpQuestion || interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'}
         </h2>
+        <label className="mt-5 block">
+          <span className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Your Answer</span>
+          <textarea
+            aria-label="Your answer"
+            className="mt-3 min-h-32 w-full resize-y rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/60"
+            placeholder="Type your answer here..."
+            rows={5}
+            value={answer}
+            onChange={(event) => onAnswerChange(event.target.value)}
+            disabled={answerDisabled}
+          />
+          {followUpError && <p className="mt-2 text-xs font-semibold text-amber-200">{followUpError}</p>}
+        </label>
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -243,7 +271,7 @@ function LiveEvaluationPanel({ metrics }) {
     </aside>
   )
 }
-function TranscriptPanel({ transcript, answer, onAnswerChange }) {
+function TranscriptPanel({ transcript }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -254,16 +282,6 @@ function TranscriptPanel({ transcript, answer, onAnswerChange }) {
         <InterviewStatusPill icon={MessageSquareText} label="Transcript" status="Streaming" tone="cyan" />
       </div>
       <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 p-4">
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Current Answer</p>
-          <textarea
-            aria-label="Current answer"
-            className="mt-3 min-h-16 w-full resize-y rounded-xl border border-white/10 bg-slate-950/50 p-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/50"
-            placeholder="Enter your answer here..."
-            value={answer}
-            onChange={(event) => onAnswerChange(event.target.value)}
-          />
-        </div>
         <div className="flex gap-3 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 p-3">
           {transcript.map((line, index) => (
             <div key={`${line}-${index}`} className="min-w-72 rounded-xl bg-white/[0.06] p-3">
@@ -293,6 +311,10 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     const savedResponse = readSessionArray('ai-interview-responses').find((item) => item.questionIndex === 0)
     return savedResponse?.answer || ''
   })
+  const [followUpQuestion, setFollowUpQuestion] = useState(() => readSessionString('ai-interview-follow-up-question'))
+  const [crossQuestion, setCrossQuestion] = useState(() => readSessionString('ai-interview-cross-question'))
+  const [followUpError, setFollowUpError] = useState('')
+  const [followUpLoading, setFollowUpLoading] = useState(false)
   const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
   const progress = questionCount > 0 ? ((currentQuestionIndex + 1) / questionCount) * 100 : 0
 
@@ -302,11 +324,15 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   }
 
   const saveCurrentAnswer = () => {
-    const nextResponses = responses.filter((item) => item.questionIndex !== currentQuestionIndex)
+    const responseType = crossQuestion ? 'cross-question' : followUpQuestion ? 'follow-up' : 'main'
+    const nextResponses = responses.filter(
+      (item) => !(item.questionIndex === currentQuestionIndex && (item.type || 'main') === responseType),
+    )
     nextResponses.push({
-      question: interviewQuestions[currentQuestionIndex],
+      question: crossQuestion || followUpQuestion || interviewQuestions[currentQuestionIndex],
       answer: answerDraft,
       questionIndex: currentQuestionIndex,
+      type: responseType,
     })
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
@@ -315,11 +341,15 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
 
   const updateAnswer = (answer) => {
     setAnswerDraft(answer)
-    const nextResponses = responses.filter((item) => item.questionIndex !== currentQuestionIndex)
+    const responseType = crossQuestion ? 'cross-question' : followUpQuestion ? 'follow-up' : 'main'
+    const nextResponses = responses.filter(
+      (item) => !(item.questionIndex === currentQuestionIndex && (item.type || 'main') === responseType),
+    )
     nextResponses.push({
-      question: interviewQuestions[currentQuestionIndex],
+      question: crossQuestion || followUpQuestion || interviewQuestions[currentQuestionIndex],
       answer,
       questionIndex: currentQuestionIndex,
+      type: responseType,
     })
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
@@ -327,13 +357,21 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
 
   const completeResponses = () => {
     const savedResponses = saveCurrentAnswer()
-    const completedResponses = interviewQuestions.map((question, index) =>
-      savedResponses.find((response) => response.questionIndex === index) || {
+    const completedResponses = interviewQuestions.flatMap((question, index) => {
+      const mainResponse = savedResponses.find(
+        (response) => response.questionIndex === index && (response.type || 'main') === 'main',
+      ) || {
         question,
         answer: '',
         questionIndex: index,
-      },
-    )
+        type: 'main',
+      }
+      const followUpResponses = savedResponses.filter(
+        (response) =>
+          response.questionIndex === index && ['follow-up', 'cross-question'].includes(response.type),
+      )
+      return [mainResponse, ...followUpResponses]
+    })
     saveResponses(completedResponses)
     return completedResponses
   }
@@ -379,12 +417,93 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         questionCount={questionCount}
         progress={progress}
         elapsedSeconds={elapsedSeconds}
+        isFollowUp={Boolean(followUpQuestion || crossQuestion)}
+        isLoading={followUpLoading}
         onExit={onExit}
-        onNextQuestion={() => {
-          saveCurrentAnswer()
-          const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
-          setQuestionIndex(nextIndex)
-          setAnswerDraft(responses.find((response) => response.questionIndex === nextIndex)?.answer || '')
+        onNextQuestion={async () => {
+          const savedResponses = saveCurrentAnswer()
+          if (crossQuestion) {
+            const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+            setCrossQuestion('')
+            window.sessionStorage.removeItem('ai-interview-cross-question')
+            setFollowUpError('')
+            setQuestionIndex(nextIndex)
+            setAnswerDraft(
+              savedResponses.find(
+                (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+              )?.answer || '',
+            )
+            return
+          }
+
+          if (followUpQuestion) {
+            const resumeClaims = Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : []
+            const resumeClaim = resumeClaims[currentQuestionIndex % Math.max(resumeClaims.length, 1)]
+            if (!resumeClaim) {
+              const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+              setFollowUpQuestion('')
+              window.sessionStorage.removeItem('ai-interview-follow-up-question')
+              setQuestionIndex(nextIndex)
+              setAnswerDraft(
+                savedResponses.find(
+                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+                )?.answer || '',
+              )
+              return
+            }
+
+            setFollowUpError('')
+            setFollowUpLoading(true)
+            try {
+              const generatedCrossQuestion = await generateCrossQuestion(
+                resumeClaim,
+                interviewQuestions[currentQuestionIndex],
+                answerDraft,
+              )
+              setCrossQuestion(generatedCrossQuestion)
+              window.sessionStorage.setItem('ai-interview-cross-question', generatedCrossQuestion)
+              setAnswerDraft('')
+            } catch (error) {
+              setFollowUpError(error instanceof Error ? error.message : 'Cross-question unavailable.')
+              const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+              setQuestionIndex(nextIndex)
+              setAnswerDraft(
+                savedResponses.find(
+                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+                )?.answer || '',
+              )
+            } finally {
+              setFollowUpLoading(false)
+            }
+            return
+          }
+
+          setFollowUpError('')
+          setFollowUpLoading(true)
+          try {
+            const generatedFollowUp = await generateFollowUpQuestion(
+              interviewQuestions[currentQuestionIndex],
+              answerDraft,
+            )
+            setFollowUpQuestion(generatedFollowUp)
+            window.sessionStorage.setItem('ai-interview-follow-up-question', generatedFollowUp)
+            setAnswerDraft(
+              savedResponses.find(
+                (response) => response.questionIndex === currentQuestionIndex && response.type === 'follow-up',
+              )?.answer || '',
+            )
+          } catch (error) {
+            setFollowUpError(error instanceof Error ? error.message : 'Follow-up question unavailable.')
+            const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+            setQuestionIndex(nextIndex)
+            setAnswerDraft(
+              savedResponses.find(
+                (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+              )?.answer || '',
+            )
+          } finally {
+            setFollowUpLoading(false)
+          }
         }}
         onFinish={() => onFinish(completeResponses())}
       />
@@ -392,13 +511,19 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         <AIInterviewerPanel
           interviewQuestions={interviewQuestions}
           questionIndex={currentQuestionIndex}
+          followUpQuestion={followUpQuestion}
+          crossQuestion={crossQuestion}
           elapsedSeconds={elapsedSeconds}
+          answer={answerDraft}
+          onAnswerChange={updateAnswer}
+          followUpError={followUpError}
+          answerDisabled={followUpLoading}
         />
         <WebcamInterviewPanel cameraOn microphoneOn pulse={audioPulse} />
         <LiveEvaluationPanel metrics={metrics} />
       </div>
       <div className="p-4 pt-0">
-        <TranscriptPanel transcript={transcript} answer={answerDraft} onAnswerChange={updateAnswer} />
+        <TranscriptPanel transcript={transcript} />
       </div>
     </main>
   )

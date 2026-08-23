@@ -7,7 +7,12 @@ from dotenv import load_dotenv
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-from services.question_generator import QuestionGenerationError, generate_initial_questions
+from services.question_generator import (
+    QuestionGenerationError,
+    generate_cross_question,
+    generate_follow_up_question,
+    generate_initial_questions,
+)
 from services.resume_parser import PDFExtractionError, extract_resume_profile, extract_text_from_pdf
 
 
@@ -30,6 +35,47 @@ def error_response(message, status_code):
 @app.get("/health")
 def health_check():
     return jsonify({"status": "ok"}), 200
+
+
+@app.post("/api/interview/follow-up")
+def generate_follow_up():
+    payload = request.get_json(silent=True) or {}
+    question = payload.get("question")
+    answer = payload.get("answer")
+    if not isinstance(question, str) or not question.strip() or not isinstance(answer, str):
+        return error_response("Question and answer are required.", 400)
+
+    try:
+        follow_up_question = generate_follow_up_question(question.strip(), answer.strip())
+    except QuestionGenerationError as exc:
+        app.logger.exception("Follow-up question generation failed: %s", exc)
+        return error_response(str(exc), 502)
+    except Exception:
+        app.logger.exception("Unexpected follow-up question generation failure")
+        return error_response("Unexpected server error while generating a follow-up question.", 500)
+
+    return jsonify({"followUpQuestion": follow_up_question}), 200
+
+
+@app.post("/api/interview/cross-question")
+def generate_cross_question_route():
+    payload = request.get_json(silent=True) or {}
+    resume_claim = payload.get("resumeClaim")
+    question = payload.get("question")
+    answer = payload.get("answer")
+    if not all(isinstance(value, str) and value.strip() for value in (resume_claim, question, answer)):
+        return error_response("Resume claim, question, and answer are required.", 400)
+
+    try:
+        cross_question = generate_cross_question(resume_claim.strip(), question.strip(), answer.strip())
+    except QuestionGenerationError as exc:
+        app.logger.exception("Cross-question generation failed: %s", exc)
+        return error_response(str(exc), 502)
+    except Exception:
+        app.logger.exception("Unexpected cross-question generation failure")
+        return error_response("Unexpected server error while generating a cross-question.", 500)
+
+    return jsonify({"crossQuestion": cross_question}), 200
 
 
 @app.post("/api/interview/prepare")
@@ -86,7 +132,13 @@ def prepare_interview():
                 pass
 
     app.logger.info("prepare stage=response returned status=200")
-    return jsonify({"status": "success", "questions": questions}), 200
+    resume_claims = [
+        claim
+        for section in (resume_profile.get("projects", []), resume_profile.get("experience", []))
+        for claim in section
+        if claim
+    ]
+    return jsonify({"status": "success", "questions": questions, "resumeClaims": resume_claims}), 200
 
 
 if __name__ == "__main__":

@@ -29,5 +29,39 @@ export async function prepareInterviewQuestions(resumeFile) {
     throw new Error('Backend returned an invalid question list.')
   }
 
-  return questions
+  return { questions, resumeClaims: Array.isArray(payload?.resumeClaims) ? payload.resumeClaims : [] }
+}
+
+export async function generateFollowUpQuestion(question, answer) {
+  const response = await fetch(`${apiBaseUrl}/api/interview/follow-up`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, answer }),
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Failed to generate a follow-up question.')
+  }
+
+  if (typeof payload?.followUpQuestion !== 'string' || !payload.followUpQuestion.trim()) {
+    throw new Error('Backend returned an invalid follow-up question.')
+  }
+  return payload.followUpQuestion.trim()
+}
+
+export async function generateCrossQuestion(resumeClaim, question, answer) {
+  const response = await fetch(`${apiBaseUrl}/api/interview/cross-question`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resumeClaim, question, answer }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Failed to generate a cross-question.')
+  }
+  if (typeof payload?.crossQuestion !== 'string' || !payload.crossQuestion.trim()) {
+    throw new Error('Backend returned an invalid cross-question.')
+  }
+  return payload.crossQuestion.trim()
 }

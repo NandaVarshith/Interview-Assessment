@@ -446,10 +446,10 @@ function CandidatePortal({ onExit }) {
     const runPreparation = async () => {
       setPreparationState({ status: 'loading', error: '' })
       try {
-        const questions = await prepareInterviewQuestions(candidate.resumeFile)
+        const { questions, resumeClaims } = await prepareInterviewQuestions(candidate.resumeFile)
         if (cancelled) return
 
-        const nextCandidate = { ...candidate, generatedQuestions: questions }
+        const nextCandidate = { ...candidate, generatedQuestions: questions, resumeClaims }
         setCandidate(nextCandidate)
         window.sessionStorage.setItem('ai-interview-generated-questions', JSON.stringify(questions))
         window.sessionStorage.setItem(
@@ -466,6 +466,7 @@ function CandidatePortal({ onExit }) {
             resumeType: nextCandidate.resumeType,
             savedAt: nextCandidate.savedAt,
             generatedQuestions: questions,
+            resumeClaims,
           }),
         )
         setPreparationState({ status: 'success', error: '' })

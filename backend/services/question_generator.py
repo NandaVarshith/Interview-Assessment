@@ -94,3 +94,92 @@ def generate_initial_questions(resume_text, resume_profile):
         return _parse_questions(content)
     except json.JSONDecodeError as exc:
         raise QuestionGenerationError("LLM returned non-JSON output.") from exc
+
+
+def generate_follow_up_question(question, answer):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise QuestionGenerationError("OPENAI_API_KEY is not configured.")
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    prompt = f"""
+Create exactly one concise technical follow-up question.
+Focus on the candidate's actual answer, probe deeper knowledge, and ask for clarification if the answer is vague.
+Do not repeat the original question. Return only the question text, with no numbering or explanation.
+
+Original question:
+{question}
+
+Candidate answer:
+{answer}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You generate one concise technical follow-up question."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.4,
+        )
+        content = response.choices[0].message.content.strip()
+    except Exception as exc:
+        error_name = exc.__class__.__name__
+        if error_name == "AuthenticationError":
+            raise QuestionGenerationError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
+        if error_name == "APIConnectionError":
+            raise QuestionGenerationError("LLM connection failed.") from exc
+        raise QuestionGenerationError("LLM request failed.") from exc
+
+    if not content:
+        raise QuestionGenerationError("LLM returned an empty follow-up question.")
+    return content.strip().strip('"')
+
+
+def generate_cross_question(resume_claim, question, answer):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise QuestionGenerationError("OPENAI_API_KEY is not configured.")
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    prompt = f"""
+Create exactly one concise technical verification question.
+Verify the resume claim, check the candidate's technical understanding, and connect the claim with the candidate's answer.
+Do not repeat the original question. Return only the question text, with no numbering or explanation.
+
+Resume claim:
+{resume_claim}
+
+Original question:
+{question}
+
+Candidate answer:
+{answer}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You generate one concise resume-claim verification question."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.4,
+        )
+        content = response.choices[0].message.content.strip()
+    except Exception as exc:
+        error_name = exc.__class__.__name__
+        if error_name == "AuthenticationError":
+            raise QuestionGenerationError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
+        if error_name == "APIConnectionError":
+            raise QuestionGenerationError("LLM connection failed.") from exc
+        raise QuestionGenerationError("LLM request failed.") from exc
+
+    if not content:
+        raise QuestionGenerationError("LLM returned an empty cross-question.")
+    return content.strip().strip('"')
