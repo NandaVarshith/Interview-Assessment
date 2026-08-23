@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 
 from services.question_generator import (
     QuestionGenerationError,
+    classify_answer,
     generate_cross_question,
     generate_follow_up_question,
     generate_initial_questions,
@@ -157,6 +158,96 @@ def generate_cross_question_route():
         return error_response("Unexpected server error while generating a cross-question.", 500)
 
     return jsonify({"crossQuestion": cross_question, "resumeClaim": resume_claim, "claimIndex": claim_index}), 200
+
+
+@app.post("/api/interview/decision")
+def interview_decision():
+    payload = request.get_json(silent=True) or {}
+    question_index = payload.get("questionIndex")
+    main_question = payload.get("mainQuestion")
+    main_answer = payload.get("mainAnswer")
+    follow_up_question = payload.get("followUpQuestion")
+    follow_up_answer = payload.get("followUpAnswer")
+    resume_claims = payload.get("resumeClaims", [])
+    used_claim_indexes = payload.get("usedClaimIndexes", [])
+    planned_questions = payload.get("plannedQuestions", [])
+    responses = payload.get("responses", [])
+    if (
+        not isinstance(question_index, int)
+        or not isinstance(main_question, str) or not main_question.strip()
+        or not isinstance(main_answer, str)
+        or (follow_up_question is not None and not isinstance(follow_up_question, str))
+        or (follow_up_answer is not None and not isinstance(follow_up_answer, str))
+        or not isinstance(resume_claims, list)
+        or not all(isinstance(claim, str) and claim.strip() for claim in resume_claims)
+        or not isinstance(used_claim_indexes, list)
+        or not isinstance(planned_questions, list)
+        or not isinstance(responses, list)
+    ):
+        return error_response("Interview decision context is invalid.", 400)
+
+    follow_up_question = follow_up_question or ""
+    follow_up_answer = follow_up_answer or ""
+    latest_answer = follow_up_answer if follow_up_question else main_answer
+    answer_class = classify_answer(follow_up_question or main_question, latest_answer)
+    context = " ".join((main_question, main_answer, follow_up_question, follow_up_answer))
+    used_indexes = {index for index in used_claim_indexes if isinstance(index, int)}
+
+    try:
+        if follow_up_question:
+            action = "cross_question"
+            reason = "The follow-up answer provides context for verifying a relevant resume claim."
+        elif answer_class == "insufficient":
+            action = "clarify"
+            reason = "The answer is too short or indicates missing knowledge, so a basic clarification is useful."
+        elif answer_class == "vague":
+            action = "clarify"
+            reason = "The answer is relevant but lacks enough detail, so one clarification is useful."
+        else:
+            action = "cross_question"
+            reason = "A relevant resume claim should be verified before moving on."
+
+        claim_index = select_resume_claim(resume_claims, context, used_indexes)
+        if action == "cross_question" and claim_index is not None:
+            resume_claim = resume_claims[claim_index]
+            cross_question = generate_cross_question(resume_claim, main_question, context)
+            return jsonify({
+                "action": action,
+                "reason": reason,
+                "question": cross_question,
+                "topic": "resume claim",
+                "difficulty": "medium",
+                "source": "resume_claim",
+                "resumeClaim": resume_claim,
+                "claimIndex": claim_index,
+            }), 200
+
+        if not follow_up_question and answer_class in {"vague", "insufficient"}:
+            follow_up = generate_follow_up_question(main_question, main_answer)
+            if follow_up.get("followUpQuestion"):
+                return jsonify({
+                    "action": action,
+                    "reason": reason,
+                    "question": follow_up["followUpQuestion"],
+                    "topic": "current question",
+                    "difficulty": "basic" if answer_class == "insufficient" else "medium",
+                    "source": "follow-up",
+                }), 200
+    except QuestionGenerationError as exc:
+        app.logger.exception("Interview decision generation failed: %s", exc)
+        return error_response(str(exc), 502)
+    except Exception:
+        app.logger.exception("Unexpected interview decision failure")
+        return error_response("Unexpected server error while deciding the next interview action.", 500)
+
+    return jsonify({
+        "action": "change_topic" if planned_questions and question_index < len(planned_questions) - 1 else "next",
+        "reason": "The current answer is sufficiently covered; continue to the next planned question.",
+        "question": None,
+        "topic": None,
+        "difficulty": "medium",
+        "source": "planned" if planned_questions else None,
+    }), 200
 
 
 @app.post("/api/interview/prepare")

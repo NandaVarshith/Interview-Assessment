@@ -12,7 +12,7 @@ import {
   interviewEvaluationMetrics,
   transcriptSegments,
 } from '../data/appData'
-import { generateCrossQuestion, generateFollowUpQuestion } from '../services/interviewPreparation'
+import { decideInterviewAction } from '../services/interviewPreparation'
 
 function formatInterviewTime(seconds) {
   const minutes = Math.floor(seconds / 60)
@@ -459,24 +459,38 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
               const mainResponse = savedResponses.find(
                 (response) => response.questionIndex === currentQuestionIndex && (response.type || 'main') === 'main',
               )
-              const crossResponse = await generateCrossQuestion(
-                Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
-                interviewQuestions[currentQuestionIndex],
-                mainResponse?.answer || '',
+              const decision = await decideInterviewAction({
+                questionIndex: currentQuestionIndex,
+                mainQuestion: interviewQuestions[currentQuestionIndex],
+                mainAnswer: mainResponse?.answer || '',
                 followUpQuestion,
-                answerDraft,
-                savedResponses
+                followUpAnswer: answerDraft,
+                resumeClaims: Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
+                usedClaimIndexes: savedResponses
                   .filter((response) => response.type === 'cross-question' && Number.isInteger(response.claimIndex))
                   .map((response) => response.claimIndex),
-              )
-              if (crossResponse.skip) {
-                throw new Error('No relevant resume claim was found; continuing to the next question.')
+                plannedQuestions: interviewQuestions,
+                responses: savedResponses,
+              })
+              if (decision.action === 'cross_question') {
+                setCrossQuestion(decision.question)
+                setCrossClaim(decision.resumeClaim || '')
+                setCrossClaimIndex(Number.isInteger(decision.claimIndex) ? decision.claimIndex : null)
+                window.sessionStorage.setItem('ai-interview-cross-question', decision.question)
+                setAnswerDraft('')
+              } else {
+                const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+                setCrossQuestion('')
+                setCrossClaim('')
+                setCrossClaimIndex(null)
+                setFollowUpQuestion('')
+                window.sessionStorage.removeItem('ai-interview-cross-question')
+                window.sessionStorage.removeItem('ai-interview-follow-up-question')
+                setQuestionIndex(nextIndex)
+                setAnswerDraft(savedResponses.find(
+                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+                )?.answer || '')
               }
-              setCrossQuestion(crossResponse.crossQuestion)
-              setCrossClaim(crossResponse.resumeClaim)
-              setCrossClaimIndex(crossResponse.claimIndex)
-              window.sessionStorage.setItem('ai-interview-cross-question', crossResponse.crossQuestion)
-              setAnswerDraft('')
             } catch (error) {
               setFollowUpError(error instanceof Error ? error.message : 'Cross-question unavailable.')
               const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
@@ -501,27 +515,36 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           setFollowUpError('')
           setFollowUpLoading(true)
           try {
-            const followUpResponse = await generateFollowUpQuestion(
-              interviewQuestions[currentQuestionIndex],
-              answerDraft,
-            )
-            if (!followUpResponse.followUpQuestion) {
+            const decision = await decideInterviewAction({
+              questionIndex: currentQuestionIndex,
+              mainQuestion: interviewQuestions[currentQuestionIndex],
+              mainAnswer: answerDraft,
+              followUpQuestion: null,
+              followUpAnswer: null,
+              resumeClaims: Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
+              usedClaimIndexes: savedResponses
+                .filter((response) => response.type === 'cross-question' && Number.isInteger(response.claimIndex))
+                .map((response) => response.claimIndex),
+              plannedQuestions: interviewQuestions,
+              responses: savedResponses,
+            })
+            if (decision.action === 'probe' || decision.action === 'clarify') {
+              setFollowUpQuestion(decision.question)
+              window.sessionStorage.setItem('ai-interview-follow-up-question', decision.question)
+              setAnswerDraft('')
+            } else if (decision.action === 'cross_question') {
+              setCrossQuestion(decision.question)
+              setCrossClaim(decision.resumeClaim || '')
+              setCrossClaimIndex(Number.isInteger(decision.claimIndex) ? decision.claimIndex : null)
+              window.sessionStorage.setItem('ai-interview-cross-question', decision.question)
+              setAnswerDraft('')
+            } else {
               const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
               setQuestionIndex(nextIndex)
-              setAnswerDraft(
-                savedResponses.find(
-                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
-                )?.answer || '',
-              )
-              return
+              setAnswerDraft(savedResponses.find(
+                (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+              )?.answer || '')
             }
-            setFollowUpQuestion(followUpResponse.followUpQuestion)
-            window.sessionStorage.setItem('ai-interview-follow-up-question', followUpResponse.followUpQuestion)
-            setAnswerDraft(
-              savedResponses.find(
-                (response) => response.questionIndex === currentQuestionIndex && response.type === 'follow-up',
-              )?.answer || '',
-            )
           } catch (error) {
             setFollowUpError(error instanceof Error ? error.message : 'Follow-up question unavailable.')
             const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)

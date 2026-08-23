@@ -77,3 +77,23 @@ export async function generateCrossQuestion(resumeClaims, question, answer, foll
     crossQuestion: payload.crossQuestion.trim(),
   }
 }
+
+export async function decideInterviewAction(context) {
+  const response = await fetch(`${apiBaseUrl}/api/interview/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(context),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Failed to decide the next interview action.')
+  }
+  if (!['probe', 'clarify', 'cross_question', 'change_topic', 'next'].includes(payload?.action)) {
+    throw new Error('Backend returned an invalid interview decision.')
+  }
+  if (['probe', 'clarify', 'cross_question'].includes(payload.action)
+    && (typeof payload.question !== 'string' || !payload.question.trim())) {
+    throw new Error('Backend returned an invalid interview question.')
+  }
+  return { ...payload, question: payload.question?.trim() || null }
+}
