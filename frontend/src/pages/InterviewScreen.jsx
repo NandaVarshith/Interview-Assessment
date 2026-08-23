@@ -313,6 +313,8 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   })
   const [followUpQuestion, setFollowUpQuestion] = useState(() => readSessionString('ai-interview-follow-up-question'))
   const [crossQuestion, setCrossQuestion] = useState(() => readSessionString('ai-interview-cross-question'))
+  const [crossClaim, setCrossClaim] = useState('')
+  const [crossClaimIndex, setCrossClaimIndex] = useState(null)
   const [followUpError, setFollowUpError] = useState('')
   const [followUpLoading, setFollowUpLoading] = useState(false)
   const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
@@ -328,12 +330,17 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     const nextResponses = responses.filter(
       (item) => !(item.questionIndex === currentQuestionIndex && (item.type || 'main') === responseType),
     )
-    nextResponses.push({
+    const response = {
       question: crossQuestion || followUpQuestion || interviewQuestions[currentQuestionIndex],
       answer: answerDraft,
       questionIndex: currentQuestionIndex,
       type: responseType,
-    })
+    }
+    if (crossQuestion) {
+      response.resumeClaim = crossClaim
+      response.claimIndex = crossClaimIndex
+    }
+    nextResponses.push(response)
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
     return nextResponses
@@ -345,12 +352,17 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     const nextResponses = responses.filter(
       (item) => !(item.questionIndex === currentQuestionIndex && (item.type || 'main') === responseType),
     )
-    nextResponses.push({
+    const response = {
       question: crossQuestion || followUpQuestion || interviewQuestions[currentQuestionIndex],
       answer,
       questionIndex: currentQuestionIndex,
       type: responseType,
-    })
+    }
+    if (crossQuestion) {
+      response.resumeClaim = crossClaim
+      response.claimIndex = crossClaimIndex
+    }
+    nextResponses.push(response)
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
   }
@@ -425,7 +437,11 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           if (crossQuestion) {
             const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
             setCrossQuestion('')
+            setCrossClaim('')
+            setCrossClaimIndex(null)
+            setFollowUpQuestion('')
             window.sessionStorage.removeItem('ai-interview-cross-question')
+            window.sessionStorage.removeItem('ai-interview-follow-up-question')
             setFollowUpError('')
             setQuestionIndex(nextIndex)
             setAnswerDraft(
@@ -437,35 +453,39 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           }
 
           if (followUpQuestion) {
-            const resumeClaims = Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : []
-            const resumeClaim = resumeClaims[currentQuestionIndex % Math.max(resumeClaims.length, 1)]
-            if (!resumeClaim) {
-              const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
-              setFollowUpQuestion('')
-              window.sessionStorage.removeItem('ai-interview-follow-up-question')
-              setQuestionIndex(nextIndex)
-              setAnswerDraft(
-                savedResponses.find(
-                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
-                )?.answer || '',
-              )
-              return
-            }
-
             setFollowUpError('')
             setFollowUpLoading(true)
             try {
-              const generatedCrossQuestion = await generateCrossQuestion(
-                resumeClaim,
-                interviewQuestions[currentQuestionIndex],
-                answerDraft,
+              const mainResponse = savedResponses.find(
+                (response) => response.questionIndex === currentQuestionIndex && (response.type || 'main') === 'main',
               )
-              setCrossQuestion(generatedCrossQuestion)
-              window.sessionStorage.setItem('ai-interview-cross-question', generatedCrossQuestion)
+              const crossResponse = await generateCrossQuestion(
+                Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
+                interviewQuestions[currentQuestionIndex],
+                mainResponse?.answer || '',
+                followUpQuestion,
+                answerDraft,
+                savedResponses
+                  .filter((response) => response.type === 'cross-question' && Number.isInteger(response.claimIndex))
+                  .map((response) => response.claimIndex),
+              )
+              if (crossResponse.skip) {
+                throw new Error('No relevant resume claim was found; continuing to the next question.')
+              }
+              setCrossQuestion(crossResponse.crossQuestion)
+              setCrossClaim(crossResponse.resumeClaim)
+              setCrossClaimIndex(crossResponse.claimIndex)
+              window.sessionStorage.setItem('ai-interview-cross-question', crossResponse.crossQuestion)
               setAnswerDraft('')
             } catch (error) {
               setFollowUpError(error instanceof Error ? error.message : 'Cross-question unavailable.')
               const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+              setCrossQuestion('')
+              setCrossClaim('')
+              setCrossClaimIndex(null)
+              setFollowUpQuestion('')
+              window.sessionStorage.removeItem('ai-interview-cross-question')
+              window.sessionStorage.removeItem('ai-interview-follow-up-question')
               setQuestionIndex(nextIndex)
               setAnswerDraft(
                 savedResponses.find(
@@ -481,12 +501,22 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           setFollowUpError('')
           setFollowUpLoading(true)
           try {
-            const generatedFollowUp = await generateFollowUpQuestion(
+            const followUpResponse = await generateFollowUpQuestion(
               interviewQuestions[currentQuestionIndex],
               answerDraft,
             )
-            setFollowUpQuestion(generatedFollowUp)
-            window.sessionStorage.setItem('ai-interview-follow-up-question', generatedFollowUp)
+            if (!followUpResponse.followUpQuestion) {
+              const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+              setQuestionIndex(nextIndex)
+              setAnswerDraft(
+                savedResponses.find(
+                  (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
+                )?.answer || '',
+              )
+              return
+            }
+            setFollowUpQuestion(followUpResponse.followUpQuestion)
+            window.sessionStorage.setItem('ai-interview-follow-up-question', followUpResponse.followUpQuestion)
             setAnswerDraft(
               savedResponses.find(
                 (response) => response.questionIndex === currentQuestionIndex && response.type === 'follow-up',

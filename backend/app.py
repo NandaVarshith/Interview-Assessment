@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import re
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -32,6 +33,65 @@ def error_response(message, status_code):
     return jsonify({"status": "error", "message": message}), status_code
 
 
+def select_resume_claim(claims, context, used_indexes):
+    stop_words = {
+        "and", "the", "this", "that", "with", "from", "have", "used", "using", "into", "for", "was",
+        "were", "their", "they", "your", "about", "how", "what", "when", "where", "which", "that",
+    }
+    context_tokens = {
+        token for token in re.findall(r"[a-z0-9+#.]+", context.lower()) if len(token) > 2 and token not in stop_words
+    }
+    scored = []
+    for index, claim in enumerate(claims):
+        claim_tokens = {
+            token for token in re.findall(r"[a-z0-9+#.]+", claim.lower()) if len(token) > 2 and token not in stop_words
+        }
+        score = len(context_tokens & claim_tokens)
+        if score:
+            scored.append((index, score, index in used_indexes))
+    unused = [item for item in scored if not item[2]]
+    candidates = unused or scored
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[1])[0]
+
+
+def filter_resume_claims(claims):
+    technical_terms = {
+        "api", "backend", "frontend", "react", "node", "flask", "django", "spring", "java", "python",
+        "sql", "mysql", "postgresql", "mongodb", "database", "jwt", "oauth", "authentication", "security",
+        "machine", "learning", "model", "tensorflow", "pytorch", "performance", "scalable", "optimization",
+        "deployment", "docker", "kubernetes", "cloud", "feature", "algorithm", "pipeline", "service",
+    }
+    low_value_patterns = (
+        r"\bteamwork\b",
+        r"\bcollaborat(?:e|ed|ion|ing)\b",
+        r"\b(version control|git|github)\b",
+        r"\bresponsible for\b",
+        r"\bcrud\b",
+    )
+    filtered = []
+    token_sets = []
+    for claim in claims:
+        normalized = re.sub(r"\s+", " ", str(claim)).strip(" .;,-")
+        lowered = normalized.lower()
+        tokens = set(re.findall(r"[a-z0-9+#.]+", lowered))
+        if len(normalized) < 35 or len(tokens) < 5:
+            continue
+        technical = tokens & technical_terms
+        if not technical or any(re.search(pattern, lowered) for pattern in low_value_patterns):
+            strong_terms = technical & {"api", "backend", "frontend", "authentication", "security", "database", "model", "performance", "scalable", "optimization", "pipeline"}
+            if not strong_terms:
+                continue
+        if any(len(tokens & previous) / min(len(tokens), len(previous)) >= 0.8 for previous in token_sets):
+            continue
+        filtered.append(normalized)
+        token_sets.append(tokens)
+        if len(filtered) == 10:
+            break
+    return filtered
+
+
 @app.get("/health")
 def health_check():
     return jsonify({"status": "ok"}), 200
@@ -46,7 +106,7 @@ def generate_follow_up():
         return error_response("Question and answer are required.", 400)
 
     try:
-        follow_up_question = generate_follow_up_question(question.strip(), answer.strip())
+        follow_up_response = generate_follow_up_question(question.strip(), answer.strip())
     except QuestionGenerationError as exc:
         app.logger.exception("Follow-up question generation failed: %s", exc)
         return error_response(str(exc), 502)
@@ -54,20 +114,41 @@ def generate_follow_up():
         app.logger.exception("Unexpected follow-up question generation failure")
         return error_response("Unexpected server error while generating a follow-up question.", 500)
 
-    return jsonify({"followUpQuestion": follow_up_question}), 200
+    return jsonify(follow_up_response), 200
 
 
 @app.post("/api/interview/cross-question")
 def generate_cross_question_route():
     payload = request.get_json(silent=True) or {}
-    resume_claim = payload.get("resumeClaim")
+    resume_claims = payload.get("resumeClaims")
     question = payload.get("question")
     answer = payload.get("answer")
-    if not all(isinstance(value, str) and value.strip() for value in (resume_claim, question, answer)):
-        return error_response("Resume claim, question, and answer are required.", 400)
+    follow_up_question = payload.get("followUpQuestion", "")
+    follow_up_answer = payload.get("followUpAnswer", "")
+    used_claim_indexes = payload.get("usedClaimIndexes", [])
+    if (
+        not isinstance(resume_claims, list)
+        or not all(isinstance(claim, str) and claim.strip() for claim in resume_claims)
+        or not all(isinstance(value, str) for value in (question, answer, follow_up_question, follow_up_answer))
+        or not isinstance(used_claim_indexes, list)
+    ):
+        return error_response("Resume claims and interview context are required.", 400)
+
+    claim_index = select_resume_claim(
+        resume_claims,
+        " ".join((question, answer, follow_up_question, follow_up_answer)),
+        {index for index in used_claim_indexes if isinstance(index, int)},
+    )
+    if claim_index is None:
+        return jsonify({"crossQuestion": None, "resumeClaim": None, "claimIndex": None, "skip": True}), 200
+
+    resume_claim = resume_claims[claim_index]
+    combined_answer = answer
+    if follow_up_question or follow_up_answer:
+        combined_answer += f"\nFollow-up question: {follow_up_question}\nFollow-up answer: {follow_up_answer}"
 
     try:
-        cross_question = generate_cross_question(resume_claim.strip(), question.strip(), answer.strip())
+        cross_question = generate_cross_question(resume_claim.strip(), question.strip(), combined_answer.strip())
     except QuestionGenerationError as exc:
         app.logger.exception("Cross-question generation failed: %s", exc)
         return error_response(str(exc), 502)
@@ -75,7 +156,7 @@ def generate_cross_question_route():
         app.logger.exception("Unexpected cross-question generation failure")
         return error_response("Unexpected server error while generating a cross-question.", 500)
 
-    return jsonify({"crossQuestion": cross_question}), 200
+    return jsonify({"crossQuestion": cross_question, "resumeClaim": resume_claim, "claimIndex": claim_index}), 200
 
 
 @app.post("/api/interview/prepare")
@@ -138,6 +219,7 @@ def prepare_interview():
         for claim in section
         if claim
     ]
+    resume_claims = filter_resume_claims(resume_claims)
     return jsonify({"status": "success", "questions": questions, "resumeClaims": resume_claims}), 200
 
 

@@ -44,24 +44,36 @@ export async function generateFollowUpQuestion(question, answer) {
     throw new Error(payload?.message || 'Failed to generate a follow-up question.')
   }
 
-  if (typeof payload?.followUpQuestion !== 'string' || !payload.followUpQuestion.trim()) {
+  if (!['clear', 'vague', 'insufficient'].includes(payload?.answerClass)) {
+    throw new Error('Backend returned an invalid answer classification.')
+  }
+  if (payload.followUpQuestion == null) {
+    return payload
+  }
+  if (typeof payload.followUpQuestion !== 'string' || !payload.followUpQuestion.trim()) {
     throw new Error('Backend returned an invalid follow-up question.')
   }
-  return payload.followUpQuestion.trim()
+  return { ...payload, followUpQuestion: payload.followUpQuestion.trim() }
 }
 
-export async function generateCrossQuestion(resumeClaim, question, answer) {
+export async function generateCrossQuestion(resumeClaims, question, answer, followUpQuestion, followUpAnswer, usedClaimIndexes) {
   const response = await fetch(`${apiBaseUrl}/api/interview/cross-question`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resumeClaim, question, answer }),
+    body: JSON.stringify({ resumeClaims, question, answer, followUpQuestion, followUpAnswer, usedClaimIndexes }),
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error(payload?.message || 'Failed to generate a cross-question.')
   }
+  if (payload?.skip) {
+    return payload
+  }
   if (typeof payload?.crossQuestion !== 'string' || !payload.crossQuestion.trim()) {
     throw new Error('Backend returned an invalid cross-question.')
   }
-  return payload.crossQuestion.trim()
+  return {
+    ...payload,
+    crossQuestion: payload.crossQuestion.trim(),
+  }
 }
