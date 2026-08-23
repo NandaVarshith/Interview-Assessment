@@ -269,6 +269,25 @@ function CandidateReportPage({ candidate, onExit }) {
             </div>
           </div>
         </header>
+        {candidate.evaluation && (
+          <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Technical Evaluation</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                ['Technical Knowledge', candidate.evaluation.technicalKnowledge],
+                ['Answer Quality', candidate.evaluation.answerQuality],
+                ['Resume Consistency', candidate.evaluation.resumeConsistency],
+                ['Topic Coverage', candidate.evaluation.topicCoverage],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
+                  <p className="mt-2 text-lg font-black capitalize text-slate-950">{value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-4 text-sm leading-7 text-slate-700">{candidate.evaluation.summary}</p>
+          </section>
+        )}
         <section className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {candidateReportData.scores.map((item) => (
             <ReportScoreCard key={item.label} item={item} />

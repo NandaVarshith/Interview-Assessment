@@ -175,6 +175,67 @@ Previous relevant context:
     return evaluation
 
 
+def evaluate_interview_summary(summary):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise QuestionGenerationError("OPENAI_API_KEY is not configured.")
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    prompt = f"""
+Evaluate this completed technical interview using only the supplied interview evidence.
+Return strict JSON only in this shape:
+{{"technicalKnowledge":"high|medium|low","answerQuality":"high|medium|low","resumeConsistency":"high|medium|low","topicCoverage":"high|medium|low","strengths":[],"weaknesses":[],"summary":"short explanation"}}
+Consider technical knowledge, answer relevance, depth, correctness, consistency with resume claims,
+and coverage of planned topics. Do not invent facts, calculate a numerical score, or make a hiring recommendation.
+Keep strengths and weaknesses concise.
+
+Interview summary:
+{json.dumps(summary, ensure_ascii=True)[:14000]}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You evaluate a completed technical interview and return strict JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content.strip()
+    except Exception as exc:
+        error_name = exc.__class__.__name__
+        if error_name == "AuthenticationError":
+            raise QuestionGenerationError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
+        if error_name == "APIConnectionError":
+            raise QuestionGenerationError("LLM connection failed.") from exc
+        raise QuestionGenerationError("LLM request failed.") from exc
+
+    try:
+        content = re.sub(r"^```json\s*|^```\s*|\s*```$", "", content, flags=re.IGNORECASE)
+        evaluation = json.loads(content)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise QuestionGenerationError("LLM returned invalid interview evaluation JSON.") from exc
+
+    levels = {"high", "medium", "low"}
+    if (
+        not isinstance(evaluation, dict)
+        or any(evaluation.get(field) not in levels for field in (
+            "technicalKnowledge", "answerQuality", "resumeConsistency", "topicCoverage",
+        ))
+        or not isinstance(evaluation.get("strengths"), list)
+        or not isinstance(evaluation.get("weaknesses"), list)
+        or not isinstance(evaluation.get("summary"), str)
+    ):
+        raise QuestionGenerationError("LLM returned an invalid interview evaluation.")
+    evaluation["strengths"] = [str(item).strip() for item in evaluation["strengths"] if str(item).strip()]
+    evaluation["weaknesses"] = [str(item).strip() for item in evaluation["weaknesses"] if str(item).strip()]
+    evaluation["summary"] = evaluation["summary"].strip()
+    return evaluation
+
+
 def generate_follow_up_question(question, answer, allow_clear=False):
     answer_class = classify_answer(question, answer)
     if answer_class == "clear" and not allow_clear:

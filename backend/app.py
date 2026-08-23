@@ -12,6 +12,7 @@ from services.question_generator import (
     QuestionGenerationError,
     classify_answer,
     evaluate_answer,
+    evaluate_interview_summary,
     generate_cross_question,
     generate_follow_up_question,
     generate_initial_questions,
@@ -335,6 +336,29 @@ def interview_decision():
         "source": "planned" if planned_questions else None,
         "evaluation": evaluation,
     }), 200
+
+
+@app.post("/api/interview/evaluate")
+def evaluate_interview():
+    summary = request.get_json(silent=True) or {}
+    if (
+        not isinstance(summary, dict)
+        or not isinstance(summary.get("questions"), list)
+        or not isinstance(summary.get("responses"), list)
+        or not isinstance(summary.get("resumeClaims", []), list)
+        or not isinstance(summary.get("decisions", []), list)
+    ):
+        return error_response("A normalized interview summary is required.", 400)
+
+    try:
+        evaluation = evaluate_interview_summary(summary)
+    except QuestionGenerationError as exc:
+        app.logger.exception("Final interview evaluation failed: %s", exc)
+        return error_response(str(exc), 502)
+    except Exception:
+        app.logger.exception("Unexpected final interview evaluation failure")
+        return error_response("Unexpected server error while evaluating the interview.", 500)
+    return jsonify(evaluation), 200
 
 
 @app.post("/api/interview/prepare")

@@ -106,3 +106,28 @@ export async function decideInterviewAction(context) {
   }
   return { ...payload, question: payload.question?.trim() || null }
 }
+
+export async function evaluateInterviewSummary(summary) {
+  const response = await fetch(`${apiBaseUrl}/api/interview/evaluate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(summary),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Failed to evaluate the completed interview.')
+  }
+  const levels = ['high', 'medium', 'low']
+  if (
+    !levels.includes(payload?.technicalKnowledge)
+    || !levels.includes(payload?.answerQuality)
+    || !levels.includes(payload?.resumeConsistency)
+    || !levels.includes(payload?.topicCoverage)
+    || !Array.isArray(payload?.strengths)
+    || !Array.isArray(payload?.weaknesses)
+    || typeof payload?.summary !== 'string'
+  ) {
+    throw new Error('Backend returned an invalid interview evaluation.')
+  }
+  return payload
+}
