@@ -110,9 +110,74 @@ def classify_answer(question, answer):
     return "clear"
 
 
-def generate_follow_up_question(question, answer):
+def evaluate_answer(question, answer, context=""):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise QuestionGenerationError("OPENAI_API_KEY is not configured.")
+
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    prompt = f"""
+Evaluate the candidate's answer for a junior software engineering interview.
+Return strict JSON only in this shape:
+{{"correctness":"high|medium|low","relevance":"high|medium|low","depth":"high|medium|low","missingConcepts":[],"summary":"short explanation"}}
+Assess correctness, relevance to the question, and practical depth. Do not assign a numerical score,
+make hiring recommendations, or assume facts not present in the answer or context.
+Keep missingConcepts concise and include only important missing ideas.
+
+Question:
+{question}
+
+Candidate answer:
+{answer}
+
+Previous relevant context:
+{context}
+""".strip()
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You evaluate one interview answer and return strict JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        content = response.choices[0].message.content.strip()
+    except Exception as exc:
+        error_name = exc.__class__.__name__
+        if error_name == "AuthenticationError":
+            raise QuestionGenerationError("LLM authentication failed. Check OPENAI_API_KEY.") from exc
+        if error_name == "APIConnectionError":
+            raise QuestionGenerationError("LLM connection failed.") from exc
+        raise QuestionGenerationError("LLM request failed.") from exc
+
+    try:
+        content = re.sub(r"^```json\s*|^```\s*|\s*```$", "", content, flags=re.IGNORECASE)
+        evaluation = json.loads(content)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise QuestionGenerationError("LLM returned invalid answer evaluation JSON.") from exc
+
+    levels = {"high", "medium", "low"}
+    if (
+        not isinstance(evaluation, dict)
+        or evaluation.get("correctness") not in levels
+        or evaluation.get("relevance") not in levels
+        or evaluation.get("depth") not in levels
+        or not isinstance(evaluation.get("missingConcepts"), list)
+        or not isinstance(evaluation.get("summary"), str)
+    ):
+        raise QuestionGenerationError("LLM returned an invalid answer evaluation.")
+    evaluation["missingConcepts"] = [str(item).strip() for item in evaluation["missingConcepts"] if str(item).strip()]
+    evaluation["summary"] = evaluation["summary"].strip()
+    return evaluation
+
+
+def generate_follow_up_question(question, answer, allow_clear=False):
     answer_class = classify_answer(question, answer)
-    if answer_class == "clear":
+    if answer_class == "clear" and not allow_clear:
         return {"answerClass": answer_class, "followUpQuestion": None}
 
     api_key = os.getenv("OPENAI_API_KEY")
@@ -126,6 +191,7 @@ def generate_follow_up_question(question, answer):
 Create exactly one concise technical follow-up question for a {answer_class} answer.
 For a vague answer, ask for one important missing implementation detail.
 For an insufficient answer, ask one simple fundamental clarification question; do not assume advanced experience.
+For a clear but shallow answer, ask one practical probe for the most important missing implementation detail.
 Target a fresher or junior software engineer at basic-to-medium difficulty.
 Focus on one practical implementation concept from the candidate's answer and keep it answerable in about 30 to 90 seconds.
 Probe only one level deeper when the answer supports it; do not introduce technologies or experience not present in the conversation or resume context.

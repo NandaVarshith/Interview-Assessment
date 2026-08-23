@@ -307,6 +307,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     : readSessionArray('ai-interview-generated-questions')
   const questionCount = interviewQuestions.length
   const [responses, setResponses] = useState(() => readSessionArray('ai-interview-responses'))
+  const [decisions, setDecisions] = useState(() => readSessionArray('ai-interview-decisions'))
   const [answerDraft, setAnswerDraft] = useState(() => {
     const savedResponse = readSessionArray('ai-interview-responses').find((item) => item.questionIndex === 0)
     return savedResponse?.answer || ''
@@ -367,6 +368,30 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     saveResponses(nextResponses)
   }
 
+  const storeEvaluation = (savedResponses, evaluation, responseType) => {
+    if (!evaluation) return savedResponses
+    const evaluatedResponses = savedResponses.map((response) => (
+      response.questionIndex === currentQuestionIndex && (response.type || 'main') === responseType
+        ? { ...response, evaluation }
+        : response
+    ))
+    saveResponses(evaluatedResponses)
+    return evaluatedResponses
+  }
+
+  const storeDecision = (decision) => {
+    const nextDecisions = [
+      ...decisions.filter((item) => !(
+        item.questionIndex === currentQuestionIndex
+        && item.action === decision.action
+        && item.question === decision.question
+      )),
+      { ...decision, questionIndex: currentQuestionIndex },
+    ]
+    setDecisions(nextDecisions)
+    window.sessionStorage.setItem('ai-interview-decisions', JSON.stringify(nextDecisions))
+  }
+
   const completeResponses = () => {
     const savedResponses = saveCurrentAnswer()
     const completedResponses = interviewQuestions.flatMap((question, index) => {
@@ -385,6 +410,24 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       return [mainResponse, ...followUpResponses]
     })
     saveResponses(completedResponses)
+    const candidateInfo = Object.fromEntries(
+      Object.entries(candidate).filter(([key]) => ![
+        'resumeFile',
+        'generatedQuestions',
+        'resumeClaims',
+        'responses',
+      ].includes(key)),
+    )
+    const summary = {
+      candidate: candidateInfo,
+      questions: interviewQuestions,
+      responses: completedResponses,
+      resumeClaims: Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
+      decisions: readSessionArray('ai-interview-decisions'),
+      completed: true,
+      completedAt: new Date().toISOString(),
+    }
+    window.sessionStorage.setItem('ai-interview-summary', JSON.stringify(summary))
     return completedResponses
   }
   useEffect(() => {
@@ -472,6 +515,8 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
                 plannedQuestions: interviewQuestions,
                 responses: savedResponses,
               })
+              storeDecision(decision)
+              const evaluatedResponses = storeEvaluation(savedResponses, decision.evaluation, 'follow-up')
               if (decision.action === 'cross_question') {
                 setCrossQuestion(decision.question)
                 setCrossClaim(decision.resumeClaim || '')
@@ -487,7 +532,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
                 window.sessionStorage.removeItem('ai-interview-cross-question')
                 window.sessionStorage.removeItem('ai-interview-follow-up-question')
                 setQuestionIndex(nextIndex)
-                setAnswerDraft(savedResponses.find(
+                setAnswerDraft(evaluatedResponses.find(
                   (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
                 )?.answer || '')
               }
@@ -528,6 +573,8 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
               plannedQuestions: interviewQuestions,
               responses: savedResponses,
             })
+            storeDecision(decision)
+            const evaluatedResponses = storeEvaluation(savedResponses, decision.evaluation, 'main')
             if (decision.action === 'probe' || decision.action === 'clarify') {
               setFollowUpQuestion(decision.question)
               window.sessionStorage.setItem('ai-interview-follow-up-question', decision.question)
@@ -541,7 +588,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
             } else {
               const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
               setQuestionIndex(nextIndex)
-              setAnswerDraft(savedResponses.find(
+              setAnswerDraft(evaluatedResponses.find(
                 (response) => response.questionIndex === nextIndex && (response.type || 'main') === 'main',
               )?.answer || '')
             }

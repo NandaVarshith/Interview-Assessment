@@ -95,5 +95,14 @@ export async function decideInterviewAction(context) {
     && (typeof payload.question !== 'string' || !payload.question.trim())) {
     throw new Error('Backend returned an invalid interview question.')
   }
+  if (payload.evaluation && (
+    !['high', 'medium', 'low'].includes(payload.evaluation.correctness)
+    || !['high', 'medium', 'low'].includes(payload.evaluation.relevance)
+    || !['high', 'medium', 'low'].includes(payload.evaluation.depth)
+    || !Array.isArray(payload.evaluation.missingConcepts)
+    || typeof payload.evaluation.summary !== 'string'
+  )) {
+    throw new Error('Backend returned an invalid answer evaluation.')
+  }
   return { ...payload, question: payload.question?.trim() || null }
 }

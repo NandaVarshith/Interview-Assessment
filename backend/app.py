@@ -11,6 +11,7 @@ from werkzeug.utils import secure_filename
 from services.question_generator import (
     QuestionGenerationError,
     classify_answer,
+    evaluate_answer,
     generate_cross_question,
     generate_follow_up_question,
     generate_initial_questions,
@@ -55,6 +56,51 @@ def select_resume_claim(claims, context, used_indexes):
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[1])[0]
+
+
+def _decision_answer_class(question, answer):
+    answer_class = classify_answer(question, answer)
+    if answer_class != "clear":
+        return answer_class
+    word_count = len(re.findall(r"[a-z0-9+#.]+", answer.lower()))
+    return "shallow" if word_count < 18 else "strong"
+
+
+def _topic_tokens(value):
+    stop_words = {"and", "the", "this", "that", "with", "from", "have", "used", "using", "into", "for", "was", "were", "how", "what"}
+    return {
+        token for token in re.findall(r"[a-z0-9+#.]+", value.lower())
+        if len(token) > 2 and token not in stop_words
+    }
+
+
+def _topic_was_covered(question, responses, current_index):
+    current_tokens = _topic_tokens(question)
+    if not current_tokens:
+        return False
+    for response in responses:
+        if not isinstance(response, dict) or response.get("questionIndex") == current_index:
+            continue
+        if response.get("type", "main") != "main":
+            continue
+        previous_tokens = _topic_tokens(
+            f"{response.get('question', '')} {response.get('answer', '')}"
+        )
+        if len(current_tokens & previous_tokens) >= 2:
+            return True
+    return False
+
+
+def _question_was_asked(question, responses):
+    question_tokens = _topic_tokens(question)
+    if not question_tokens:
+        return False
+    for response in responses:
+        previous_tokens = _topic_tokens(str(response.get("question", ""))) if isinstance(response, dict) else set()
+        overlap = len(question_tokens & previous_tokens)
+        if overlap >= 2 and overlap / max(len(question_tokens), 1) >= 0.5:
+            return True
+    return False
 
 
 def filter_resume_claims(claims):
@@ -189,25 +235,59 @@ def interview_decision():
     follow_up_question = follow_up_question or ""
     follow_up_answer = follow_up_answer or ""
     latest_answer = follow_up_answer if follow_up_question else main_answer
-    answer_class = classify_answer(follow_up_question or main_question, latest_answer)
+    answer_class = _decision_answer_class(follow_up_question or main_question, latest_answer)
     context = " ".join((main_question, main_answer, follow_up_question, follow_up_answer))
     used_indexes = {index for index in used_claim_indexes if isinstance(index, int)}
+    topic_covered = _topic_was_covered(main_question, responses, question_index)
+    previous_context = " ".join(
+        f"Question: {item.get('question', '')} Answer: {item.get('answer', '')}"
+        for item in responses[-8:] if isinstance(item, dict)
+    )[:4000]
 
     try:
+        evaluation = evaluate_answer(
+            follow_up_question or main_question,
+            latest_answer,
+            previous_context,
+        )
+    except QuestionGenerationError as exc:
+        app.logger.exception("Answer evaluation failed; using existing decision signals: %s", exc)
+        evaluation = None
+
+    try:
+        low_evaluation = evaluation and (
+            evaluation["correctness"] == "low" or evaluation["relevance"] == "low"
+        )
+        missing_depth = evaluation and evaluation["depth"] == "medium" and evaluation["missingConcepts"]
         if follow_up_question:
             action = "cross_question"
             reason = "The follow-up answer provides context for verifying a relevant resume claim."
+        elif low_evaluation:
+            action = "clarify"
+            reason = "The answer needs clarification because its correctness or relevance is limited."
+        elif evaluation and all(
+            evaluation[field] == "high" for field in ("correctness", "relevance", "depth")
+        ):
+            action = "cross_question"
+            reason = "The answer is strong; verify a relevant resume claim if one is available, otherwise move on."
         elif answer_class == "insufficient":
             action = "clarify"
             reason = "The answer is too short or indicates missing knowledge, so a basic clarification is useful."
         elif answer_class == "vague":
             action = "clarify"
             reason = "The answer is relevant but lacks enough detail, so one clarification is useful."
+        elif answer_class == "shallow" or missing_depth:
+            action = "probe"
+            reason = "The answer is correct but shallow, so one practical implementation detail is useful."
         else:
             action = "cross_question"
             reason = "A relevant resume claim should be verified before moving on."
 
         claim_index = select_resume_claim(resume_claims, context, used_indexes)
+        if topic_covered and (claim_index is None or claim_index in used_indexes) and answer_class in {"shallow", "strong"}:
+            claim_index = None
+            action = "change_topic"
+            reason = "This topic was already covered in the interview, so move to a different planned topic."
         if action == "cross_question" and claim_index is not None:
             resume_claim = resume_claims[claim_index]
             cross_question = generate_cross_question(resume_claim, main_question, context)
@@ -220,11 +300,16 @@ def interview_decision():
                 "source": "resume_claim",
                 "resumeClaim": resume_claim,
                 "claimIndex": claim_index,
+                "evaluation": evaluation,
             }), 200
 
-        if not follow_up_question and answer_class in {"vague", "insufficient"}:
-            follow_up = generate_follow_up_question(main_question, main_answer)
-            if follow_up.get("followUpQuestion"):
+        if not follow_up_question and (answer_class in {"vague", "insufficient", "shallow"} or low_evaluation or missing_depth):
+            follow_up = generate_follow_up_question(
+                main_question,
+                main_answer,
+                allow_clear=answer_class == "shallow" or bool(low_evaluation or missing_depth),
+            )
+            if follow_up.get("followUpQuestion") and not _question_was_asked(follow_up["followUpQuestion"], responses):
                 return jsonify({
                     "action": action,
                     "reason": reason,
@@ -232,6 +317,7 @@ def interview_decision():
                     "topic": "current question",
                     "difficulty": "basic" if answer_class == "insufficient" else "medium",
                     "source": "follow-up",
+                    "evaluation": evaluation,
                 }), 200
     except QuestionGenerationError as exc:
         app.logger.exception("Interview decision generation failed: %s", exc)
@@ -247,6 +333,7 @@ def interview_decision():
         "topic": None,
         "difficulty": "medium",
         "source": "planned" if planned_questions else None,
+        "evaluation": evaluation,
     }), 200
 
 
