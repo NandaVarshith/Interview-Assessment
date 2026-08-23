@@ -8,6 +8,7 @@ import {
 import { Button } from '../components/ui/button'
 import { PROJECT_NAME, mockCandidateDefaults, systemCheckItems } from '../data/appData'
 import { saveCandidateForDevelopment, validateCandidateForm } from '../services/candidateStorage'
+import { prepareInterviewQuestions } from '../services/interviewPreparation'
 import { useSystemChecks } from '../services/systemChecks'
 import InterviewScreen from './InterviewScreen'
 import CandidateReportPage from './CandidateReportPage'
@@ -326,12 +327,18 @@ function SystemCheck({ candidate, onContinue }) {
     </PortalCard>
   )
 }
-function WaitingScreen({ candidate, onEnterInterview }) {
+function WaitingScreen({ candidate, preparationState, onEnterInterview, onRetry }) {
+  const isLoading = preparationState.status === 'loading'
+  const hasError = preparationState.status === 'error'
+  const questionsReady =
+    preparationState.status === 'success' &&
+    Array.isArray(candidate.generatedQuestions) &&
+    candidate.generatedQuestions.length > 0
   return (
     <PortalCard
       eyebrow="Step 03"
       title="Interview Waiting Room"
-      description="Candidate details are locked in while the mock AI service prepares resume-driven adaptive questions."
+      description="Candidate details are locked in while the backend prepares personalized questions from the uploaded resume."
     >
       <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
@@ -364,25 +371,55 @@ function WaitingScreen({ candidate, onEnterInterview }) {
                 <BrainCircuit className="relative text-cyan-200" size={42} />
               </div>
               <h2 className="mt-7 text-2xl font-black tracking-tight text-white">
-                AI is preparing questions
+                {questionsReady ? 'Questions Ready' : isLoading ? 'AI is preparing questions' : 'Preparation failed'}
               </h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-slate-300">
-                Parsing resume claims, selecting domain probes, and calibrating interview difficulty
-                using mock API data.
+                {questionsReady
+                  ? 'The backend has generated personalized questions from the uploaded resume.'
+                  : isLoading
+                    ? 'Parsing the resume, extracting skills and projects, and generating personalized questions from the backend.'
+                    : preparationState.error || 'We could not prepare interview questions from the backend.'}
               </p>
               <div className="mt-6 inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/10 px-4 py-2">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300" />
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    questionsReady ? 'bg-emerald-300' : isLoading ? 'animate-pulse bg-cyan-300' : 'bg-rose-300'
+                  }`}
+                />
                 <span className="text-sm font-black text-white">
-                  Estimated wait time: {candidate.estimatedWait}
+                  {questionsReady ? 'Questions generated' : isLoading ? 'Preparing from resume' : 'Retry preparation'}
                 </span>
               </div>
-              <Button
-                className="mx-auto mt-6 h-12 bg-cyan-400 px-6 text-slate-950 hover:bg-cyan-300"
-                onClick={onEnterInterview}
-              >
-                Enter Interview
-                <ArrowRight size={18} />
-              </Button>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                {isLoading && (
+                  <Button
+                    variant="secondary"
+                    className="h-12 border-white/10 bg-white/10 px-6 text-white hover:bg-white/15"
+                    disabled
+                  >
+                    Enter Interview
+                    <ArrowRight size={18} />
+                  </Button>
+                )}
+                {questionsReady && (
+                  <Button
+                    className="h-12 bg-cyan-400 px-6 text-slate-950 hover:bg-cyan-300"
+                    onClick={onEnterInterview}
+                  >
+                    Enter Interview
+                    <ArrowRight size={18} />
+                  </Button>
+                )}
+                {hasError && (
+                  <Button
+                    className="h-12 bg-cyan-400 px-6 text-slate-950 hover:bg-cyan-300"
+                    onClick={onRetry}
+                  >
+                    Retry Preparation
+                    <ArrowRight size={18} />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -394,8 +431,76 @@ function WaitingScreen({ candidate, onEnterInterview }) {
 function CandidatePortal({ onExit }) {
   const [step, setStep] = useState(0)
   const [candidate, setCandidate] = useState(null)
+  const [preparationState, setPreparationState] = useState({
+    status: 'idle',
+    error: '',
+  })
+
+  useEffect(() => {
+    if (step !== 2 || !candidate?.resumeFile || preparationState.status !== 'idle') {
+      return undefined
+    }
+
+    let cancelled = false
+
+    const runPreparation = async () => {
+      setPreparationState({ status: 'loading', error: '' })
+      try {
+        const questions = await prepareInterviewQuestions(candidate.resumeFile)
+        if (cancelled) return
+
+        const nextCandidate = { ...candidate, generatedQuestions: questions }
+        setCandidate(nextCandidate)
+        window.sessionStorage.setItem('ai-interview-generated-questions', JSON.stringify(questions))
+        window.sessionStorage.setItem(
+          'ai-interview-candidate',
+          JSON.stringify({
+            name: nextCandidate.name,
+            email: nextCandidate.email,
+            role: nextCandidate.role,
+            sessionId: nextCandidate.sessionId,
+            resumeScore: nextCandidate.resumeScore,
+            estimatedWait: nextCandidate.estimatedWait,
+            resumeName: nextCandidate.resumeName,
+            resumeSize: nextCandidate.resumeSize,
+            resumeType: nextCandidate.resumeType,
+            savedAt: nextCandidate.savedAt,
+            generatedQuestions: questions,
+          }),
+        )
+        setPreparationState({ status: 'success', error: '' })
+      } catch (error) {
+        if (cancelled) return
+        setPreparationState({
+          status: 'error',
+          error: error instanceof Error ? error.message : 'Unable to prepare interview questions.',
+        })
+      }
+    }
+
+    void runPreparation()
+
+    return () => {
+      cancelled = true
+    }
+  }, [candidate, step])
+
+  const retryPreparation = () => {
+    setPreparationState({ status: 'idle', error: '' })
+    setCandidate((current) => (current ? { ...current } : current))
+  }
+
   if (step === 3 && candidate) {
-    return <InterviewScreen candidate={candidate} onExit={onExit} onFinish={() => setStep(4)} />
+    return (
+      <InterviewScreen
+        candidate={candidate}
+        onExit={onExit}
+        onFinish={(responses) => {
+          setCandidate((current) => ({ ...current, responses }))
+          setStep(4)
+        }}
+      />
+    )
   }
   if (step === 4 && candidate) {
     return <CandidateReportPage candidate={candidate} onExit={onExit} />
@@ -414,7 +519,19 @@ function CandidatePortal({ onExit }) {
         <SystemCheck candidate={candidate} onContinue={() => setStep(2)} />
       )}
       {step === 2 && candidate && (
-        <WaitingScreen candidate={candidate} onEnterInterview={() => setStep(3)} />
+        <WaitingScreen
+          candidate={{
+            ...candidate,
+            generatedQuestions: candidate.generatedQuestions,
+          }}
+          preparationState={preparationState}
+          onEnterInterview={() => {
+            if (preparationState.status === 'success') {
+              setStep(3)
+            }
+          }}
+          onRetry={retryPreparation}
+        />
       )}
     </CandidatePortalShell>
   )

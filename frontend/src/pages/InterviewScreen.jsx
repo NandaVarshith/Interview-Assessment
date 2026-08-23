@@ -10,7 +10,6 @@ import { Button } from '../components/ui/button'
 import {
   initialInterviewMetrics,
   interviewEvaluationMetrics,
-  interviewQuestions,
   transcriptSegments,
 } from '../data/appData'
 
@@ -18,6 +17,14 @@ function formatInterviewTime(seconds) {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
+function readSessionArray(key) {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(key) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
 }
 function InterviewStatusPill({ icon: Icon, label, status, tone = 'emerald' }) {
   const toneClasses = {
@@ -34,7 +41,7 @@ function InterviewStatusPill({ icon: Icon, label, status, tone = 'emerald' }) {
     </div>
   )
 }
-function InterviewTopBar({ candidate, questionIndex, progress, elapsedSeconds, onExit, onFinish }) {
+function InterviewTopBar({ candidate, questionIndex, questionCount, progress, elapsedSeconds, onExit, onNextQuestion, onFinish }) {
   return (
     <header className="border-b border-white/10 bg-slate-950/92 px-4 py-4 backdrop-blur-2xl lg:px-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -51,7 +58,7 @@ function InterviewTopBar({ candidate, questionIndex, progress, elapsedSeconds, o
         </div>
         <div className="min-w-[240px] flex-1 lg:max-w-xl">
           <div className="mb-2 flex items-center justify-between text-xs font-black uppercase tracking-[0.14em] text-slate-400">
-            <span>Question {questionIndex + 1} of {interviewQuestions.length}</span>
+            <span>Question {questionIndex + 1} of {questionCount}</span>
             <span>{Math.round(progress)}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-white/10">
@@ -73,6 +80,15 @@ function InterviewTopBar({ candidate, questionIndex, progress, elapsedSeconds, o
           >
             Exit
           </Button>
+          {questionIndex < questionCount - 1 && (
+            <Button
+              variant="secondary"
+              className="border-white/10 bg-white/10 text-white hover:bg-white/15"
+              onClick={onNextQuestion}
+            >
+              Next Question
+            </Button>
+          )}
           <Button className="bg-cyan-400 text-slate-950 hover:bg-cyan-300" onClick={onFinish}>
             Finish Interview
           </Button>
@@ -81,7 +97,7 @@ function InterviewTopBar({ candidate, questionIndex, progress, elapsedSeconds, o
     </header>
   )
 }
-function AIInterviewerPanel({ questionIndex, elapsedSeconds }) {
+function AIInterviewerPanel({ interviewQuestions, questionIndex, elapsedSeconds }) {
   return (
     <aside className="flex min-h-0 flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
@@ -103,7 +119,7 @@ function AIInterviewerPanel({ questionIndex, elapsedSeconds }) {
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Current Question</p>
         <h2 className="mt-3 text-xl font-black leading-8 tracking-tight text-white">
-          {interviewQuestions[questionIndex]}
+          {interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'}
         </h2>
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
@@ -227,7 +243,7 @@ function LiveEvaluationPanel({ metrics }) {
     </aside>
   )
 }
-function TranscriptPanel({ transcript, activeText }) {
+function TranscriptPanel({ transcript, answer, onAnswerChange }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -240,7 +256,13 @@ function TranscriptPanel({ transcript, activeText }) {
       <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
         <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 p-4">
           <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Current Answer</p>
-          <p className="mt-3 min-h-16 text-sm leading-7 text-slate-100">{activeText}</p>
+          <textarea
+            aria-label="Current answer"
+            className="mt-3 min-h-16 w-full resize-y rounded-xl border border-white/10 bg-slate-950/50 p-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/50"
+            placeholder="Enter your answer here..."
+            value={answer}
+            onChange={(event) => onAnswerChange(event.target.value)}
+          />
         </div>
         <div className="flex gap-3 overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 p-3">
           {transcript.map((line, index) => (
@@ -260,13 +282,61 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [metrics, setMetrics] = useState(initialInterviewMetrics)
   const [transcript, setTranscript] = useState([transcriptSegments[0]])
-  const [activeText, setActiveText] = useState(transcriptSegments[0])
   const [audioPulse, setAudioPulse] = useState(62)
-  const questionIndex = Math.min(
-    Math.floor(elapsedSeconds / 18),
-    interviewQuestions.length - 1,
-  )
-  const progress = ((questionIndex + 1) / interviewQuestions.length) * 100
+  const [questionIndex, setQuestionIndex] = useState(0)
+  const interviewQuestions = candidate.generatedQuestions?.length
+    ? candidate.generatedQuestions
+    : readSessionArray('ai-interview-generated-questions')
+  const questionCount = interviewQuestions.length
+  const [responses, setResponses] = useState(() => readSessionArray('ai-interview-responses'))
+  const [answerDraft, setAnswerDraft] = useState(() => {
+    const savedResponse = readSessionArray('ai-interview-responses').find((item) => item.questionIndex === 0)
+    return savedResponse?.answer || ''
+  })
+  const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
+  const progress = questionCount > 0 ? ((currentQuestionIndex + 1) / questionCount) * 100 : 0
+
+  const saveResponses = (nextResponses) => {
+    setResponses(nextResponses)
+    window.sessionStorage.setItem('ai-interview-responses', JSON.stringify(nextResponses))
+  }
+
+  const saveCurrentAnswer = () => {
+    const nextResponses = responses.filter((item) => item.questionIndex !== currentQuestionIndex)
+    nextResponses.push({
+      question: interviewQuestions[currentQuestionIndex],
+      answer: answerDraft,
+      questionIndex: currentQuestionIndex,
+    })
+    nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
+    saveResponses(nextResponses)
+    return nextResponses
+  }
+
+  const updateAnswer = (answer) => {
+    setAnswerDraft(answer)
+    const nextResponses = responses.filter((item) => item.questionIndex !== currentQuestionIndex)
+    nextResponses.push({
+      question: interviewQuestions[currentQuestionIndex],
+      answer,
+      questionIndex: currentQuestionIndex,
+    })
+    nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
+    saveResponses(nextResponses)
+  }
+
+  const completeResponses = () => {
+    const savedResponses = saveCurrentAnswer()
+    const completedResponses = interviewQuestions.map((question, index) =>
+      savedResponses.find((response) => response.questionIndex === index) || {
+        question,
+        answer: '',
+        questionIndex: index,
+      },
+    )
+    saveResponses(completedResponses)
+    return completedResponses
+  }
   useEffect(() => {
     const interval = window.setInterval(() => {
       setElapsedSeconds((value) => value + 1)
@@ -280,7 +350,6 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         ),
       )
       setAudioPulse(Math.floor(52 + Math.random() * 42))
-      setActiveText(transcriptSegments[Math.floor(Math.random() * transcriptSegments.length)])
       setTranscript((lines) => {
         const nextLine = transcriptSegments[Math.floor(Math.random() * transcriptSegments.length)]
         const nextLines = [...lines, nextLine]
@@ -289,23 +358,47 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     }, 1000)
     return () => window.clearInterval(interval)
   }, [])
+  if (questionCount === 0) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white">
+        <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-8 text-center">
+          <h1 className="text-2xl font-black">No generated questions available</h1>
+          <p className="mt-3 text-sm text-slate-300">Return to preparation and generate the interview questions again.</p>
+          <Button className="mt-6 bg-cyan-400 text-slate-950 hover:bg-cyan-300" onClick={onExit}>
+            Return to Preparation
+          </Button>
+        </div>
+      </main>
+    )
+  }
   return (
     <main className="flex min-h-screen flex-col bg-slate-950 text-white">
       <InterviewTopBar
         candidate={candidate}
-        questionIndex={questionIndex}
+        questionIndex={currentQuestionIndex}
+        questionCount={questionCount}
         progress={progress}
         elapsedSeconds={elapsedSeconds}
         onExit={onExit}
-        onFinish={onFinish}
+        onNextQuestion={() => {
+          saveCurrentAnswer()
+          const nextIndex = Math.min(currentQuestionIndex + 1, questionCount - 1)
+          setQuestionIndex(nextIndex)
+          setAnswerDraft(responses.find((response) => response.questionIndex === nextIndex)?.answer || '')
+        }}
+        onFinish={() => onFinish(completeResponses())}
       />
       <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[320px_1fr] xl:grid-cols-[320px_1fr_320px]">
-        <AIInterviewerPanel questionIndex={questionIndex} elapsedSeconds={elapsedSeconds} />
+        <AIInterviewerPanel
+          interviewQuestions={interviewQuestions}
+          questionIndex={currentQuestionIndex}
+          elapsedSeconds={elapsedSeconds}
+        />
         <WebcamInterviewPanel cameraOn microphoneOn pulse={audioPulse} />
         <LiveEvaluationPanel metrics={metrics} />
       </div>
       <div className="p-4 pt-0">
-        <TranscriptPanel transcript={transcript} activeText={activeText} />
+        <TranscriptPanel transcript={transcript} answer={answerDraft} onAnswerChange={updateAnswer} />
       </div>
     </main>
   )
