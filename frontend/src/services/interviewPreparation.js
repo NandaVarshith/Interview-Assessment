@@ -131,3 +131,21 @@ export async function evaluateInterviewSummary(summary) {
   }
   return payload
 }
+
+export async function transcribeInterviewAudio(audioBlob, durationSeconds) {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'interview-answer.webm')
+  formData.append('durationSeconds', String(durationSeconds))
+  const response = await fetch(`${apiBaseUrl}/api/interview/transcribe`, {
+    method: 'POST',
+    body: formData,
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Speech transcription failed.')
+  }
+  if (typeof payload?.transcript !== 'string' || !Number.isFinite(payload?.wordCount)) {
+    throw new Error('Backend returned an invalid speech transcript.')
+  }
+  return payload
+}

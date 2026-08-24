@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 import re
+import tempfile
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ from services.question_generator import (
     generate_initial_questions,
 )
 from services.resume_parser import PDFExtractionError, extract_resume_profile, extract_text_from_pdf
+from services.speech_analyzer import analyze_speech
 
 
 load_dotenv()
@@ -143,6 +145,57 @@ def filter_resume_claims(claims):
 @app.get("/health")
 def health_check():
     return jsonify({"status": "ok"}), 200
+
+
+@app.post("/api/interview/transcribe")
+def transcribe_interview_answer():
+    audio = request.files.get("audio")
+    duration_seconds = request.form.get("durationSeconds", "0")
+    app.logger.info(
+        "transcribe stage=request received method=%s audio_exists=%s filename=%r mimetype=%s",
+        request.method,
+        audio is not None,
+        audio.filename if audio is not None else None,
+        audio.mimetype if audio is not None else None,
+    )
+    if audio is None or not audio.filename:
+        return error_response("Audio recording is required.", 400)
+    try:
+        duration = float(duration_seconds)
+        if duration < 0 or duration > 900:
+            raise ValueError
+    except (TypeError, ValueError):
+        return error_response("A valid recording duration is required.", 400)
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_file:
+            audio.save(temp_file)
+            temp_path = temp_file.name
+        app.logger.info(
+            "transcribe audio filename=%r mimetype=%s audio_size=%d",
+            audio.filename,
+            audio.mimetype,
+            os.path.getsize(temp_path),
+        )
+        app.logger.info("transcribe stage=transcription started")
+        with open(temp_path, "rb") as audio_file:
+            result = analyze_speech(audio_file, duration)
+        app.logger.info("transcribe stage=transcription completed")
+        app.logger.info("transcribe stage=response returned status=200")
+        return jsonify(result), 200
+    except QuestionGenerationError as exc:
+        app.logger.exception("transcribe stage=failed error_type=%s error=%s", exc.__class__.__name__, exc)
+        return error_response(str(exc), 502)
+    except Exception:
+        app.logger.exception("transcribe stage=failed unexpected error")
+        return error_response("Unexpected server error while transcribing audio.", 500)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 @app.post("/api/interview/follow-up")

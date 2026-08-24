@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   BrainCircuit,
+  Mic,
   MessageSquareText,
   Video,
   Waves,
@@ -12,7 +13,7 @@ import {
   interviewEvaluationMetrics,
   transcriptSegments,
 } from '../data/appData'
-import { decideInterviewAction } from '../services/interviewPreparation'
+import { decideInterviewAction, transcribeInterviewAudio } from '../services/interviewPreparation'
 
 function formatInterviewTime(seconds) {
   const minutes = Math.floor(seconds / 60)
@@ -110,6 +111,10 @@ function AIInterviewerPanel({
   elapsedSeconds,
   answer,
   onAnswerChange,
+  onStartRecording,
+  onStopRecording,
+  isRecording,
+  speechStatus,
   followUpError,
   answerDisabled,
 }) {
@@ -147,6 +152,19 @@ function AIInterviewerPanel({
             onChange={(event) => onAnswerChange(event.target.value)}
             disabled={answerDisabled}
           />
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              className="border-cyan-300/20 bg-cyan-300/10 text-cyan-100 hover:bg-cyan-300/20"
+              onClick={isRecording ? onStopRecording : onStartRecording}
+              disabled={answerDisabled && !isRecording}
+            >
+              <Mic size={16} />
+              {isRecording ? 'Stop Recording' : 'Record Answer'}
+            </Button>
+            {speechStatus && <span className="text-xs font-semibold text-cyan-200">{speechStatus}</span>}
+          </div>
           {followUpError && <p className="mt-2 text-xs font-semibold text-amber-200">{followUpError}</p>}
         </label>
       </div>
@@ -318,6 +336,12 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const [crossClaimIndex, setCrossClaimIndex] = useState(null)
   const [followUpError, setFollowUpError] = useState('')
   const [followUpLoading, setFollowUpLoading] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [speechStatus, setSpeechStatus] = useState('')
+  const [speechMetrics, setSpeechMetrics] = useState(null)
+  const recorderRef = useRef(null)
+  const recordingStreamRef = useRef(null)
+  const recordingStartedAtRef = useRef(0)
   const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
   const progress = questionCount > 0 ? ((currentQuestionIndex + 1) / questionCount) * 100 : 0
 
@@ -341,13 +365,21 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       response.resumeClaim = crossClaim
       response.claimIndex = crossClaimIndex
     }
+    if (
+      speechMetrics
+      && speechMetrics.questionIndex === currentQuestionIndex
+      && speechMetrics.type === responseType
+    ) {
+      const { questionIndex: _questionIndex, type: _type, ...speech } = speechMetrics
+      response.speech = speech
+    }
     nextResponses.push(response)
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
     return nextResponses
   }
 
-  const updateAnswer = (answer) => {
+  const updateAnswer = (answer, answerSpeech = speechMetrics) => {
     setAnswerDraft(answer)
     const responseType = crossQuestion ? 'cross-question' : followUpQuestion ? 'follow-up' : 'main'
     const nextResponses = responses.filter(
@@ -363,9 +395,58 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       response.resumeClaim = crossClaim
       response.claimIndex = crossClaimIndex
     }
+    if (answerSpeech) response.speech = answerSpeech
     nextResponses.push(response)
     nextResponses.sort((first, second) => first.questionIndex - second.questionIndex)
     saveResponses(nextResponses)
+  }
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setSpeechStatus('Audio recording is not supported in this browser.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+      const chunks = []
+      recorderRef.current = recorder
+      recordingStreamRef.current = stream
+      recordingStartedAtRef.current = Date.now()
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        recorderRef.current = null
+        recordingStreamRef.current = null
+        setIsRecording(false)
+        setSpeechStatus('Transcribing...')
+        try {
+          const durationSeconds = (Date.now() - recordingStartedAtRef.current) / 1000
+          const result = await transcribeInterviewAudio(new Blob(chunks, { type: mimeType }), durationSeconds)
+          const combinedAnswer = [answerDraft.trim(), result.transcript.trim()].filter(Boolean).join('\n')
+          const responseType = crossQuestion ? 'cross-question' : followUpQuestion ? 'follow-up' : 'main'
+          setSpeechMetrics({ ...result, questionIndex: currentQuestionIndex, type: responseType })
+          updateAnswer(combinedAnswer, result)
+          setSpeechStatus(`Transcript ready (${result.wordCount} words)`)
+        } catch (error) {
+          setSpeechStatus(error instanceof Error ? error.message : 'Speech processing unavailable.')
+        }
+      }
+      recorder.start()
+      setIsRecording(true)
+      setSpeechStatus('Recording...')
+    } catch (error) {
+      setSpeechStatus(error instanceof Error ? error.message : 'Microphone access failed.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
   }
 
   const storeEvaluation = (savedResponses, evaluation, responseType) => {
@@ -473,7 +554,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         progress={progress}
         elapsedSeconds={elapsedSeconds}
         isFollowUp={Boolean(followUpQuestion || crossQuestion)}
-        isLoading={followUpLoading}
+        isLoading={followUpLoading || isRecording || speechStatus === 'Transcribing...'}
         onExit={onExit}
         onNextQuestion={async () => {
           const savedResponses = saveCurrentAnswer()
@@ -616,6 +697,10 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           elapsedSeconds={elapsedSeconds}
           answer={answerDraft}
           onAnswerChange={updateAnswer}
+          onStartRecording={startRecording}
+          onStopRecording={stopRecording}
+          isRecording={isRecording}
+          speechStatus={speechStatus}
           followUpError={followUpError}
           answerDisabled={followUpLoading}
         />
