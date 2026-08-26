@@ -278,7 +278,15 @@ def _aggregate_final_signals(summary, technical_evaluation):
         on_screen = float(gaze_metrics.get("lookingAtScreenPercentage", 0) or 0)
         away = float(gaze_metrics.get("lookingAwayPercentage", 0) or 0)
         down = float(gaze_metrics.get("lookingDownPercentage", 0) or 0)
-        if on_screen + away + down > 0:
+        coverage = gaze_metrics.get("observationCoverage")
+        if coverage is None:
+            valid_count = gaze_metrics.get("validObservationCount")
+            total_count = gaze_metrics.get("totalObservationCount")
+            if isinstance(valid_count, (int, float)) and isinstance(total_count, (int, float)) and total_count > 0:
+                coverage = valid_count / total_count
+            elif on_screen + away + down > 0:
+                coverage = 1.0
+        if isinstance(coverage, (int, float)) and 0.3 <= coverage <= 1 and on_screen + away + down > 0:
             attention = round(on_screen + (away + down) * 0.5)
 
     weighted_scores = [(technical_score, 0.7)]

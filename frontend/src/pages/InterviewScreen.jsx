@@ -357,7 +357,14 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const [cameraReady, setCameraReady] = useState(false)
   const gazeVideoRef = useRef(null)
   const gazeCanvasRef = useRef(null)
-  const gazeCountsRef = useRef({ looking_at_screen: 0, looking_away: 0, looking_down: 0, total: 0 })
+  const gazeCountsRef = useRef({
+    looking_at_screen: 0,
+    looking_away: 0,
+    looking_down: 0,
+    total: 0,
+    unavailable: 0,
+    multiple_faces: 0,
+  })
   const monitoringEventsRef = useRef([])
   const monitoringStateRef = useRef({ type: null, count: 0, active: false })
   const [monitoringWarning, setMonitoringWarning] = useState('')
@@ -371,12 +378,27 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     const counts = gazeCountsRef.current
     const total = counts.total
     if (!total) {
-      return { lookingAtScreenPercentage: 0, lookingAwayPercentage: 0, lookingDownPercentage: 0 }
+      return {
+        lookingAtScreenPercentage: 0,
+        lookingAwayPercentage: 0,
+        lookingDownPercentage: 0,
+        validObservationCount: 0,
+        totalObservationCount: 0,
+        unavailableObservationCount: counts.unavailable,
+        multipleFaceObservationCount: counts.multiple_faces,
+        observationCoverage: 0,
+      }
     }
+    const valid = counts.looking_at_screen + counts.looking_away + counts.looking_down
     return {
-      lookingAtScreenPercentage: Math.round((counts.looking_at_screen / total) * 100),
-      lookingAwayPercentage: Math.round((counts.looking_away / total) * 100),
-      lookingDownPercentage: Math.round((counts.looking_down / total) * 100),
+      lookingAtScreenPercentage: Math.round((counts.looking_at_screen / Math.max(valid, 1)) * 100),
+      lookingAwayPercentage: Math.round((counts.looking_away / Math.max(valid, 1)) * 100),
+      lookingDownPercentage: Math.round((counts.looking_down / Math.max(valid, 1)) * 100),
+      validObservationCount: valid,
+      totalObservationCount: total,
+      unavailableObservationCount: counts.unavailable,
+      multipleFaceObservationCount: counts.multiple_faces,
+      observationCoverage: Math.min(1, valid / total),
     }
   }
 
@@ -443,7 +465,9 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           return
         }
         const state = (await response.json())?.state
+        gazeCountsRef.current.total += 1
         if (state === 'attention_unavailable' || state === 'multiple_faces') {
+          gazeCountsRef.current[state === 'multiple_faces' ? 'multiple_faces' : 'unavailable'] += 1
           recordMonitoringState(state === 'multiple_faces' ? 'multiple-faces' : 'no-face')
           return
         }
@@ -451,7 +475,6 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           if (state === 'looking_away' || state === 'looking_down') recordMonitoringState('off-screen')
           else clearMonitoringState()
           gazeCountsRef.current[state] += 1
-          gazeCountsRef.current.total += 1
         }
       } catch {
         // Gaze is optional and must never interrupt the interview.
