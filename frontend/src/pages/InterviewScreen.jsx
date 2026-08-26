@@ -9,9 +9,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import {
-  initialInterviewMetrics,
   interviewEvaluationMetrics,
-  transcriptSegments,
 } from '../data/appData'
 import { decideInterviewAction, transcribeInterviewAudio } from '../services/interviewPreparation'
 
@@ -204,13 +202,13 @@ function AIInterviewerPanel({
     </aside>
   )
 }
-function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, pulse, monitoringWarning, videoRef }) {
+function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, monitoringWarning, videoRef }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-2xl">
         <div>
           <p className="text-sm font-black text-white">Candidate Camera</p>
-          <p className="mt-1 text-xs font-semibold text-slate-400">Mock preview · no OpenCV integration</p>
+          <p className="mt-1 text-xs font-semibold text-slate-400">Live camera preview</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <InterviewStatusPill icon={Video} label="Camera" status={cameraOn ? 'On' : 'Off'} tone="emerald" />
@@ -253,9 +251,9 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, pulse, moni
         )}
         <div className="absolute bottom-5 left-5 right-5 grid gap-3 sm:grid-cols-3">
           {[
-            ['Face centered', 'Stable'],
-            ['Audio level', `${pulse}%`],
-            ['Frame quality', 'Good'],
+            ['Face status', 'Unavailable'],
+            ['Audio level', 'Unavailable'],
+            ['Frame quality', 'Unavailable'],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl border border-white/10 bg-black/30 p-3 backdrop-blur">
               <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">{label}</p>
@@ -267,13 +265,13 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, pulse, moni
     </section>
   )
 }
-function LiveEvaluationPanel({ metrics }) {
+function LiveEvaluationPanel() {
   return (
     <aside className="min-h-0 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-sm font-black text-white">Live Evaluation</p>
-          <p className="mt-1 text-xs font-semibold text-slate-400">Mock websocket updates every second</p>
+          <p className="mt-1 text-xs font-semibold text-slate-400">Available after interview completion</p>
         </div>
         <span className="rounded-full bg-emerald-300/10 px-3 py-1 text-xs font-black text-emerald-200">
           WS
@@ -282,7 +280,6 @@ function LiveEvaluationPanel({ metrics }) {
       <div className="grid gap-3 overflow-auto pr-1">
         {interviewEvaluationMetrics.map((metric) => {
           const Icon = metric.icon
-          const value = metrics[metric.key]
           return (
             <div key={metric.key} className="rounded-2xl border border-white/10 bg-slate-950/70 p-3">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -292,13 +289,13 @@ function LiveEvaluationPanel({ metrics }) {
                   </span>
                   <span className="text-sm font-black text-white">{metric.label}</span>
                 </div>
-                <span className="text-lg font-black text-white">{value}</span>
+                <span className="text-lg font-black text-white">Unavailable</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-white/10">
                 <motion.div
                   className="h-full rounded-full"
                   style={{ backgroundColor: metric.color }}
-                  animate={{ width: `${value}%` }}
+                  animate={{ width: '0%' }}
                   transition={{ duration: 0.4, ease: 'easeOut' }}
                 />
               </div>
@@ -315,7 +312,7 @@ function TranscriptPanel({ transcript }) {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-black text-white">Answer Transcript</p>
-          <p className="mt-1 text-xs font-semibold text-slate-400">Live speech-to-text simulation</p>
+          <p className="mt-1 text-xs font-semibold text-slate-400">Available after answer submission</p>
         </div>
         <InterviewStatusPill icon={MessageSquareText} label="Transcript" status="Streaming" tone="cyan" />
       </div>
@@ -336,9 +333,7 @@ function TranscriptPanel({ transcript }) {
 }
 function InterviewScreen({ candidate, onExit, onFinish }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [metrics, setMetrics] = useState(initialInterviewMetrics)
-  const [transcript, setTranscript] = useState([transcriptSegments[0]])
-  const [audioPulse, setAudioPulse] = useState(62)
+  const [transcript] = useState([])
   const [questionIndex, setQuestionIndex] = useState(0)
   const interviewQuestions = candidate.generatedQuestions?.length
     ? candidate.generatedQuestions
@@ -400,6 +395,8 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
     setMonitoringWarning(
       type === 'no-face'
         ? 'Please ensure your face is visible to the camera.'
+        : type === 'multiple-faces'
+          ? 'Please make sure only you are visible.'
         : 'Please keep your attention on the screen.',
     )
   }
@@ -447,7 +444,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         }
         const state = (await response.json())?.state
         if (state === 'attention_unavailable' || state === 'multiple_faces') {
-          recordMonitoringState('no-face')
+          recordMonitoringState(state === 'multiple_faces' ? 'multiple-faces' : 'no-face')
           return
         }
         if (['looking_at_screen', 'looking_away', 'looking_down'].includes(state)) {
@@ -661,21 +658,6 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   useEffect(() => {
     const interval = window.setInterval(() => {
       setElapsedSeconds((value) => value + 1)
-      setMetrics((currentMetrics) =>
-        Object.fromEntries(
-          Object.entries(currentMetrics).map(([key, value]) => {
-            const movement = Math.floor(Math.random() * 7) - 3
-            const nextValue = Math.max(58, Math.min(96, value + movement))
-            return [key, nextValue]
-          }),
-        ),
-      )
-      setAudioPulse(Math.floor(52 + Math.random() * 42))
-      setTranscript((lines) => {
-        const nextLine = transcriptSegments[Math.floor(Math.random() * transcriptSegments.length)]
-        const nextLines = [...lines, nextLine]
-        return nextLines.slice(-5)
-      })
     }, 1000)
     return () => window.clearInterval(interval)
   }, [])
@@ -857,11 +839,10 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           cameraOn={cameraReady}
           microphoneOn
           isRecording={isRecording}
-          pulse={audioPulse}
           monitoringWarning={monitoringWarning}
           videoRef={gazeVideoRef}
         />
-        <LiveEvaluationPanel metrics={metrics} />
+        <LiveEvaluationPanel />
       </div>
       <div className="p-4 pt-0">
         <TranscriptPanel transcript={transcript} />

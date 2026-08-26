@@ -423,11 +423,12 @@ def classify_gaze(features, model, history):
     frozen = False
 
     if features.get("blink"):
-        direction = history[-1]["direction"] if history else "Looking On Screen"
-        confidence = history[-1]["confidence"] / 100.0 if history and history[-1]["confidence"] > 1 else (history[-1]["confidence"] if history else 1.0)
+        direction = None
+        confidence = 0.0
         frozen = True
     elif confidence < CONFIDENCE_REJECT_THRESHOLD:
-        direction = history[-1]["direction"] if history else "Looking On Screen"
+        direction = None
+        confidence = 0.0
 
     distances = {
         "screen": 0.0 if inside_horizontal and inside_vertical else float(np.linalg.norm([max(horizontal_min - corrected_h, corrected_h - horizontal_max, 0.0), max(vertical_min - corrected_v, corrected_v - vertical_max, 0.0)])),

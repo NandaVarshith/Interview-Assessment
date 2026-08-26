@@ -1,5 +1,6 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 
 import cv2
 import mediapipe as mp
@@ -9,6 +10,8 @@ from gaze_processor import GazeProcessor
 
 
 processor = GazeProcessor()
+processor_lock = Lock()
+face_mesh_lock = Lock()
 face_mesh = mp.solutions.face_mesh.FaceMesh(
     static_image_mode=True,
     max_num_faces=2,
@@ -41,7 +44,8 @@ class GazeHandler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid image frame")
             if self.path == "/api/face/check":
                 height, width, _ = frame.shape
-                results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                with face_mesh_lock:
+                    results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 faces = results.multi_face_landmarks or []
                 centered = False
                 if len(faces) == 1:
@@ -55,7 +59,9 @@ class GazeHandler(BaseHTTPRequestHandler):
                     centered = 0.25 <= center_x <= 0.75 and 0.18 <= center_y <= 0.82
                 body = json.dumps({"faceCount": len(faces), "centered": centered}).encode("utf-8")
             else:
-                body = json.dumps({"state": processor.process_frame(frame)}).encode("utf-8")
+                with processor_lock:
+                    state = processor.process_frame(frame)
+                body = json.dumps({"state": state}).encode("utf-8")
             self.send_response(200)
         except Exception:
             body = json.dumps({"faceCount": 0, "centered": False} if self.path == "/api/face/check" else {"state": "attention_unavailable"}).encode("utf-8")

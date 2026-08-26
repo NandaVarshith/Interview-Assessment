@@ -151,6 +151,9 @@ class GazeProcessor:
         self.last_state = "looking_at_screen"
 
     def process_frame(self, frame):
+        if frame is None or not hasattr(frame, "shape") or getattr(frame, "size", 0) == 0:
+            self.state_history.clear()
+            return "attention_unavailable"
         frame = cv2.flip(frame, 1)
         height, width, _ = frame.shape
         results = self.face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
