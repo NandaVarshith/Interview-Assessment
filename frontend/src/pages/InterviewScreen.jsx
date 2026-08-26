@@ -15,6 +15,8 @@ import {
 } from '../data/appData'
 import { decideInterviewAction, transcribeInterviewAudio } from '../services/interviewPreparation'
 
+const gazeApiBaseUrl = import.meta.env.VITE_GAZE_API_BASE_URL || 'http://127.0.0.1:5051'
+
 function formatInterviewTime(seconds) {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
@@ -46,11 +48,11 @@ function InterviewStatusPill({ icon: Icon, label, status, tone = 'emerald' }) {
     </div>
   )
 }
-function InterviewTopBar({ candidate, questionIndex, questionCount, progress, elapsedSeconds, isFollowUp, isLoading, onExit, onNextQuestion, onFinish }) {
+function InterviewTopBar({ candidate, questionIndex, questionCount, progress, elapsedSeconds, isFollowUp, isLoading, loadingLabel, onExit, onNextQuestion, onFinish }) {
   return (
     <header className="border-b border-white/10 bg-slate-950/92 px-4 py-4 backdrop-blur-2xl lg:px-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 max-w-full items-center gap-3">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-950/30">
             <BrainCircuit size={22} />
           </span>
@@ -61,7 +63,7 @@ function InterviewTopBar({ candidate, questionIndex, questionCount, progress, el
             </p>
           </div>
         </div>
-        <div className="min-w-[240px] flex-1 lg:max-w-xl">
+        <div className="min-w-0 flex-1 basis-full lg:basis-auto lg:max-w-xl">
           <div className="mb-2 flex items-center justify-between text-xs font-black uppercase tracking-[0.14em] text-slate-400">
             <span>Question {questionIndex + 1} of {questionCount}</span>
             <span>{Math.round(progress)}%</span>
@@ -74,7 +76,7 @@ function InterviewTopBar({ candidate, questionIndex, questionCount, progress, el
             />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <div className="rounded-full border border-white/10 bg-white/7 px-4 py-2 text-sm font-black text-white">
             {formatInterviewTime(elapsedSeconds)}
           </div>
@@ -92,7 +94,7 @@ function InterviewTopBar({ candidate, questionIndex, questionCount, progress, el
               onClick={onNextQuestion}
               disabled={isLoading}
             >
-              {isLoading ? 'Generating follow-up...' : 'Next Question'}
+              {isLoading ? loadingLabel : 'Next Question'}
             </Button>
           )}
           <Button className="bg-cyan-400 text-slate-950 hover:bg-cyan-300" onClick={onFinish}>
@@ -119,7 +121,7 @@ function AIInterviewerPanel({
   answerDisabled,
 }) {
   return (
-    <aside className="flex min-h-0 flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
+    <aside className="flex min-h-0 min-w-0 flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
         <div className="flex items-center gap-3">
           <motion.div
@@ -138,14 +140,14 @@ function AIInterviewerPanel({
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
         <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Current Question</p>
-        <h2 className="mt-3 text-xl font-black leading-8 tracking-tight text-white">
+        <h2 className="mt-3 break-words text-xl font-black leading-8 tracking-tight text-white">
           {crossQuestion || followUpQuestion || interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'}
         </h2>
         <label className="mt-5 block">
           <span className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Your Answer</span>
           <textarea
             aria-label="Your answer"
-            className="mt-3 min-h-32 w-full resize-y rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/60"
+            className="mt-3 min-h-32 w-full max-w-full resize-y rounded-xl border border-cyan-300/20 bg-slate-950/70 p-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/60"
             placeholder="Type your answer here..."
             rows={5}
             value={answer}
@@ -202,9 +204,9 @@ function AIInterviewerPanel({
     </aside>
   )
 }
-function WebcamInterviewPanel({ cameraOn, microphoneOn, pulse }) {
+function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, pulse, monitoringWarning, videoRef }) {
   return (
-    <section className="flex min-h-0 flex-col gap-4">
+    <section className="flex min-h-0 min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-2xl">
         <div>
           <p className="text-sm font-black text-white">Candidate Camera</p>
@@ -215,22 +217,42 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, pulse }) {
           <InterviewStatusPill icon={Waves} label="Microphone" status={microphoneOn ? 'Clear' : 'Muted'} tone="cyan" />
         </div>
       </div>
-      <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_24%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827_50%,#0f172a)] shadow-[0_30px_110px_rgba(0,0,0,0.34)]">
+      <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
+        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Monitoring</p>
+        <p className={`mt-2 text-sm font-black ${monitoringWarning ? 'text-amber-200' : 'text-cyan-100'}`}>
+          {monitoringWarning || 'Interview monitoring active'}
+        </p>
+      </div>
+      <div className="relative h-[min(58vh,520px)] min-h-[280px] overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_24%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827_50%,#0f172a)] shadow-[0_30px_110px_rgba(0,0,0,0.34)] lg:min-h-[420px]">
+        {cameraOn && (
+          <video
+            ref={videoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            playsInline
+            aria-label="Live camera preview"
+          />
+        )}
         <div className="absolute left-5 top-5 flex items-center gap-2 rounded-full bg-black/35 px-3 py-2 text-xs font-black text-white backdrop-blur">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
-          Recording
+          <span className={`h-2 w-2 rounded-full ${isRecording ? 'animate-pulse bg-red-400' : 'bg-emerald-400'}`} />
+          {isRecording ? 'Recording' : 'Camera ready'}
         </div>
         <div className="absolute right-5 top-5 rounded-full bg-black/35 px-3 py-2 text-xs font-black text-cyan-100 backdrop-blur">
           HD Preview
         </div>
-        <motion.div
-          className="absolute left-1/2 top-[22%] h-32 w-32 -translate-x-1/2 rounded-full border border-cyan-200/20 bg-white/10 shadow-[inset_0_0_70px_rgba(34,211,238,0.08)]"
-          animate={{ y: [0, -4, 0] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <div className="absolute left-1/2 top-[43%] h-56 w-72 -translate-x-1/2 rounded-t-[6rem] border border-cyan-200/20 bg-white/10" />
-        <div className="absolute left-1/2 top-[22%] h-40 w-44 -translate-x-1/2 rounded-[48%] border-2 border-cyan-300/35" />
-        <div className="absolute left-[18%] right-[18%] top-[18%] h-[58%] rounded-[2rem] border border-white/10" />
+        {!cameraOn && (
+          <>
+            <motion.div
+              className="absolute left-1/2 top-[22%] h-32 w-32 -translate-x-1/2 rounded-full border border-cyan-200/20 bg-white/10 shadow-[inset_0_0_70px_rgba(34,211,238,0.08)]"
+              animate={{ y: [0, -4, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <div className="absolute left-1/2 top-[43%] h-56 w-72 -translate-x-1/2 rounded-t-[6rem] border border-cyan-200/20 bg-white/10" />
+            <div className="absolute left-1/2 top-[22%] h-40 w-44 -translate-x-1/2 rounded-[48%] border-2 border-cyan-300/35" />
+            <div className="absolute left-[18%] right-[18%] top-[18%] h-[58%] rounded-[2rem] border border-white/10" />
+          </>
+        )}
         <div className="absolute bottom-5 left-5 right-5 grid gap-3 sm:grid-cols-3">
           {[
             ['Face centered', 'Stable'],
@@ -339,11 +361,134 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const [isRecording, setIsRecording] = useState(false)
   const [speechStatus, setSpeechStatus] = useState('')
   const [speechMetrics, setSpeechMetrics] = useState(null)
+  const [cameraReady, setCameraReady] = useState(false)
+  const gazeVideoRef = useRef(null)
+  const gazeCanvasRef = useRef(null)
+  const gazeCountsRef = useRef({ looking_at_screen: 0, looking_away: 0, looking_down: 0, total: 0 })
+  const monitoringEventsRef = useRef([])
+  const monitoringStateRef = useRef({ type: null, count: 0, active: false })
+  const [monitoringWarning, setMonitoringWarning] = useState('')
   const recorderRef = useRef(null)
   const recordingStreamRef = useRef(null)
   const recordingStartedAtRef = useRef(0)
   const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
   const progress = questionCount > 0 ? ((currentQuestionIndex + 1) / questionCount) * 100 : 0
+
+  const getGazeMetrics = () => {
+    const counts = gazeCountsRef.current
+    const total = counts.total
+    if (!total) {
+      return { lookingAtScreenPercentage: 0, lookingAwayPercentage: 0, lookingDownPercentage: 0 }
+    }
+    return {
+      lookingAtScreenPercentage: Math.round((counts.looking_at_screen / total) * 100),
+      lookingAwayPercentage: Math.round((counts.looking_away / total) * 100),
+      lookingDownPercentage: Math.round((counts.looking_down / total) * 100),
+    }
+  }
+
+  const recordMonitoringState = (type) => {
+    const current = monitoringStateRef.current
+    if (current.type !== type) {
+      monitoringStateRef.current = { type, count: 1, active: false }
+      return
+    }
+    current.count += 1
+    if (current.count < 3 || current.active) return
+    current.active = true
+    const event = { type, startedAt: new Date().toISOString() }
+    monitoringEventsRef.current = [...monitoringEventsRef.current, event]
+    window.sessionStorage.setItem('ai-interview-monitoring-events', JSON.stringify(monitoringEventsRef.current))
+    setMonitoringWarning(
+      type === 'no-face'
+        ? 'Please ensure your face is visible to the camera.'
+        : 'Please keep your attention on the screen.',
+    )
+  }
+
+  const clearMonitoringState = () => {
+    const current = monitoringStateRef.current
+    if (current.active) {
+      const lastEvent = monitoringEventsRef.current[monitoringEventsRef.current.length - 1]
+      if (lastEvent && !lastEvent.endedAt) lastEvent.endedAt = new Date().toISOString()
+      window.sessionStorage.setItem('ai-interview-monitoring-events', JSON.stringify(monitoringEventsRef.current))
+    }
+    monitoringStateRef.current = { type: null, count: 0, active: false }
+    setMonitoringWarning('')
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    let stream = null
+    let interval = null
+    let processing = false
+
+    const captureGazeFrame = async () => {
+      const video = gazeVideoRef.current
+      const canvas = gazeCanvasRef.current
+      if (cancelled || processing || !video || !canvas || video.readyState < 2) return
+      processing = true
+      try {
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const context = canvas.getContext('2d')
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.55))
+        if (!blob || cancelled) return
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 1500)
+        const response = await fetch(`${gazeApiBaseUrl}/api/gaze/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/jpeg' },
+          body: blob,
+          signal: controller.signal,
+        })
+        window.clearTimeout(timeout)
+        if (!response.ok) {
+          return
+        }
+        const state = (await response.json())?.state
+        if (state === 'attention_unavailable') {
+          recordMonitoringState('no-face')
+          return
+        }
+        if (['looking_at_screen', 'looking_away', 'looking_down'].includes(state)) {
+          if (state === 'looking_away' || state === 'looking_down') recordMonitoringState('off-screen')
+          else clearMonitoringState()
+          gazeCountsRef.current[state] += 1
+          gazeCountsRef.current.total += 1
+        }
+      } catch {
+        // Gaze is optional and must never interrupt the interview.
+        clearMonitoringState()
+      } finally {
+        processing = false
+      }
+    }
+
+    const startGaze = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) return
+        stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        if (cancelled || !gazeVideoRef.current) return
+        gazeVideoRef.current.srcObject = stream
+        await gazeVideoRef.current.play().catch(() => {})
+        setCameraReady(true)
+        interval = window.setInterval(captureGazeFrame, 800)
+    } catch {
+      // Camera or local vision bridge failure is intentionally ignored.
+      setCameraReady(false)
+      clearMonitoringState()
+      }
+    }
+    void startGaze()
+    return () => {
+      cancelled = true
+      if (interval) window.clearInterval(interval)
+      if (stream) stream.getTracks().forEach((track) => track.stop())
+      setCameraReady(false)
+    }
+  }, [])
 
   const saveResponses = (nextResponses) => {
     setResponses(nextResponses)
@@ -505,6 +650,10 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       responses: completedResponses,
       resumeClaims: Array.isArray(candidate.resumeClaims) ? candidate.resumeClaims : [],
       decisions: readSessionArray('ai-interview-decisions'),
+      gazeMetrics: getGazeMetrics(),
+      monitoringEvents: monitoringEventsRef.current.map((event) => (
+        event.endedAt ? event : { ...event, endedAt: new Date().toISOString() }
+      )),
       completed: true,
       completedAt: new Date().toISOString(),
     }
@@ -547,6 +696,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   }
   return (
     <main className="flex min-h-screen flex-col bg-slate-950 text-white">
+      <canvas ref={gazeCanvasRef} className="hidden" />
       <InterviewTopBar
         candidate={candidate}
         questionIndex={currentQuestionIndex}
@@ -555,6 +705,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         elapsedSeconds={elapsedSeconds}
         isFollowUp={Boolean(followUpQuestion || crossQuestion)}
         isLoading={followUpLoading || isRecording || speechStatus === 'Transcribing...'}
+        loadingLabel={followUpLoading ? 'Generating follow-up...' : isRecording ? 'Recording answer...' : 'Transcribing answer...'}
         onExit={onExit}
         onNextQuestion={async () => {
           const savedResponses = saveCurrentAnswer()
@@ -688,7 +839,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         }}
         onFinish={() => onFinish(completeResponses())}
       />
-      <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[320px_1fr] xl:grid-cols-[320px_1fr_320px]">
+      <div className="grid min-h-0 min-w-0 flex-1 items-start gap-4 p-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_minmax(0,320px)]">
         <AIInterviewerPanel
           interviewQuestions={interviewQuestions}
           questionIndex={currentQuestionIndex}
@@ -704,7 +855,14 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           followUpError={followUpError}
           answerDisabled={followUpLoading}
         />
-        <WebcamInterviewPanel cameraOn microphoneOn pulse={audioPulse} />
+        <WebcamInterviewPanel
+          cameraOn={cameraReady}
+          microphoneOn
+          isRecording={isRecording}
+          pulse={audioPulse}
+          monitoringWarning={monitoringWarning}
+          videoRef={gazeVideoRef}
+        />
         <LiveEvaluationPanel metrics={metrics} />
       </div>
       <div className="p-4 pt-0">

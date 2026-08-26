@@ -16,7 +16,7 @@ import CandidateReportPage from './CandidateReportPage'
 function CandidatePortalShell({ children, step, onExit }) {
   const steps = ['Login', 'System Check', 'Waiting Room', 'Interview']
   return (
-    <main className="min-h-screen overflow-hidden bg-slate-950 text-white">
+    <main className="min-h-screen overflow-x-hidden bg-slate-950 text-white">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(37,99,235,0.24),transparent_30%),radial-gradient(circle_at_86%_18%,rgba(20,184,166,0.18),transparent_32%),linear-gradient(180deg,#020617_0%,#0f172a_48%,#020617_100%)]" />
       <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
@@ -60,16 +60,16 @@ function CandidatePortalShell({ children, step, onExit }) {
             Back to Site
           </Button>
         </header>
-        <div className="grid flex-1 place-items-center py-8">{children}</div>
+        <div className="grid flex-1 items-start py-6 sm:py-8">{children}</div>
       </div>
     </main>
   )
 }
 function PortalCard({ eyebrow, title, description, children }) {
   return (
-    <section className="w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-white/[0.07] shadow-[0_35px_120px_rgba(0,0,0,0.36)] backdrop-blur-2xl">
-      <div className="grid lg:grid-cols-[0.85fr_1.15fr]">
-        <aside className="relative min-h-72 border-b border-white/10 bg-slate-900/70 p-6 lg:border-b-0 lg:border-r">
+    <section className="w-full max-w-5xl min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.07] shadow-[0_35px_120px_rgba(0,0,0,0.36)] backdrop-blur-2xl">
+      <div className="grid min-w-0 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+        <aside className="relative min-h-72 min-w-0 border-b border-white/10 bg-slate-900/70 p-6 lg:border-b-0 lg:border-r">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_35%_20%,rgba(34,211,238,0.20),transparent_32%),radial-gradient(circle_at_80%_80%,rgba(37,99,235,0.20),transparent_34%)]" />
           <div className="relative flex h-full flex-col justify-between">
             <div>
@@ -94,7 +94,7 @@ function PortalCard({ eyebrow, title, description, children }) {
             </div>
           </div>
         </aside>
-        <div className="p-5 sm:p-7">{children}</div>
+        <div className="min-w-0 p-5 sm:p-7">{children}</div>
       </div>
     </section>
   )
@@ -202,7 +202,7 @@ function CandidateLogin({ onStart }) {
     </PortalCard>
   )
 }
-function CameraPreview({ stream, checks, microphoneLevel }) {
+function CameraPreview({ stream, checks }) {
   const videoRef = useRef(null)
   useEffect(() => {
     if (videoRef.current) {
@@ -211,7 +211,7 @@ function CameraPreview({ stream, checks, microphoneLevel }) {
   }, [stream])
   const previewActive = checks.preview.status === 'passed'
   return (
-    <div className="relative min-h-80 overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827)]">
+    <div className="relative aspect-video min-h-[230px] overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827)] sm:min-h-[280px]">
       <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-xs font-black text-white backdrop-blur">
         <span className={`h-2 w-2 rounded-full ${previewActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         Camera preview
@@ -219,7 +219,7 @@ function CameraPreview({ stream, checks, microphoneLevel }) {
       {stream ? (
         <video
           ref={videoRef}
-          className="h-full min-h-80 w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover"
           autoPlay
           muted
           playsInline
@@ -232,11 +232,11 @@ function CameraPreview({ stream, checks, microphoneLevel }) {
           <div className="absolute bottom-8 left-1/2 h-28 w-44 -translate-x-1/2 rounded-t-[4rem] border border-cyan-200/20 bg-slate-300/10" />
         </>
       )}
-      <div className="absolute bottom-4 left-4 right-4 grid grid-cols-3 gap-2">
+      <div className="absolute bottom-4 left-4 right-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
         {[
-          ['Face', checks.face.status === 'passed' ? 'Passed' : 'Unavailable', checks.face.status],
-          ['Light', checks.lighting.status === 'passed' ? 'Passed' : 'Unavailable', checks.lighting.status],
-          ['Audio', `${microphoneLevel}%`, checks.audioInput.status],
+          ['Face', checks.face.status === 'passed' ? 'Passed' : 'Needs attention', checks.face.status],
+          ['Lighting', checks.lighting.status === 'passed' ? 'Passed' : 'Not required', checks.lighting.status],
+          ['Audio', checks.audioInput.status === 'passed' ? 'Passed' : 'Needs attention', checks.audioInput.status],
         ].map(([label, value, status]) => (
           <div key={label} className="rounded-xl bg-white/10 px-3 py-2 text-center backdrop-blur">
             <p className="text-xs font-black text-white">{label}</p>
@@ -250,25 +250,53 @@ function CameraPreview({ stream, checks, microphoneLevel }) {
   )
 }
 function SystemCheck({ candidate, onContinue }) {
-  const { checks, cameraStream, microphoneLevel } = useSystemChecks()
-  const requiredCheckKeys = ['camera', 'preview', 'microphone', 'audioInput', 'permissions', 'internet']
+  const { checks, cameraStream } = useSystemChecks()
+  const requiredCheckKeys = ['camera', 'preview', 'microphone', 'audioInput', 'permissions', 'face', 'singleFace']
   const allPassed = requiredCheckKeys.every((key) => checks[key].status === 'passed')
+  const issueCount = requiredCheckKeys.filter((key) => checks[key].status !== 'passed').length
+
+  const getStatusLabel = (key, status) => {
+    if (status === 'passed') return 'Passed'
+    if (status === 'unavailable' && !requiredCheckKeys.includes(key)) return 'Not required'
+    return 'Needs attention'
+  }
+
+  const getStatusDetail = (key, status, detail) => {
+    if (status === 'passed') return detail
+    if (status === 'unavailable' && !requiredCheckKeys.includes(key)) return 'Not required to start the interview'
+    if (status === 'unavailable') return 'This required check is not available yet'
+    return detail
+  }
+
   return (
     <PortalCard
       eyebrow="Step 02"
       title="System Check"
       description="The interview platform verifies available browser device signals before the assessment starts."
     >
-      <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-        <CameraPreview stream={cameraStream} checks={checks} microphoneLevel={microphoneLevel} />
-        <div className="grid content-between gap-4">
-          <div className="space-y-3">
+      <div className="min-w-0 space-y-5">
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 sm:p-4">
+          <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Camera preview</p>
+          <CameraPreview stream={cameraStream} checks={checks} />
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 sm:p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Readiness checks</p>
+              <p className={`mt-2 text-lg font-black ${allPassed ? 'text-emerald-300' : 'text-amber-200'}`}>
+                {allPassed ? 'Ready to start' : `${issueCount} issue${issueCount === 1 ? '' : 's'} need${issueCount === 1 ? 's' : ''} your attention`}
+              </p>
+            </div>
+            <p className="text-xs font-semibold text-slate-500">Required checks must pass before continuing.</p>
+          </div>
+          <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2">
             {systemCheckItems.map((check) => {
               const Icon = check.icon
               const current = checks[check.key]
               const passed = current.status === 'passed'
               const failed = current.status === 'failed'
               const unavailable = current.status === 'unavailable'
+              const statusLabel = getStatusLabel(check.key, current.status)
               return (
                 <div
                   key={check.key}
@@ -289,33 +317,29 @@ function SystemCheck({ candidate, onContinue }) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-black text-white">{check.label}</p>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">
-                      {passed ? check.success : current.detail}
+                    <p className="mt-1 break-words text-xs font-semibold text-slate-500">
+                      {getStatusDetail(check.key, current.status, passed ? check.success : current.detail)}
                     </p>
                   </div>
-                  <span
-                    className={`h-2.5 w-2.5 rounded-full ${
-                      passed
-                        ? 'bg-emerald-400'
-                        : failed
-                          ? 'bg-rose-400'
-                          : unavailable
-                            ? 'bg-slate-500'
-                            : 'bg-amber-400 animate-pulse'
-                    }`}
-                  />
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide ${
+                    passed ? 'bg-emerald-400/15 text-emerald-300' : unavailable && !requiredCheckKeys.includes(check.key) ? 'bg-slate-400/15 text-slate-300' : 'bg-amber-400/15 text-amber-200'
+                  }`}>
+                    {statusLabel}
+                  </span>
                 </div>
               )
             })}
           </div>
-          <Button
-            disabled={!allPassed}
-            className="h-12 bg-cyan-400 text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            onClick={onContinue}
-          >
-            Continue
-            <ArrowRight size={18} />
-          </Button>
+          <div className="mt-5">
+            <Button
+              disabled={!allPassed}
+              className="h-12 w-full bg-cyan-400 text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              onClick={onContinue}
+            >
+              Continue
+              <ArrowRight size={18} />
+            </Button>
+          </div>
         </div>
       </div>
       <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
@@ -340,8 +364,8 @@ function WaitingScreen({ candidate, preparationState, onEnterInterview, onRetry 
       title="Interview Waiting Room"
       description="Candidate details are locked in while the backend prepares personalized questions from the uploaded resume."
     >
-      <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5">
           <p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">
             Candidate Information
           </p>
@@ -362,12 +386,12 @@ function WaitingScreen({ candidate, preparationState, onEnterInterview, onRetry 
             ))}
           </div>
         </div>
-        <div className="relative overflow-hidden rounded-2xl border border-cyan-300/20 bg-cyan-300/8 p-6">
+        <div className="relative min-w-0 overflow-hidden rounded-2xl border border-cyan-300/20 bg-cyan-300/8 p-5 sm:p-6">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.22),transparent_36%)]" />
           <div className="relative grid min-h-80 place-items-center text-center">
             <div>
               <div className="relative mx-auto grid h-28 w-28 place-items-center rounded-full border border-cyan-300/30 bg-slate-950/60">
-                <span className="absolute h-full w-full animate-ping rounded-full bg-cyan-300/20" />
+                <span className={`absolute h-full w-full rounded-full bg-cyan-300/20 ${isLoading ? 'animate-ping' : ''}`} />
                 <BrainCircuit className="relative text-cyan-200" size={42} />
               </div>
               <h2 className="mt-7 text-2xl font-black tracking-tight text-white">
