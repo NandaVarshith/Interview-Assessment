@@ -233,7 +233,72 @@ Interview summary:
     evaluation["strengths"] = [str(item).strip() for item in evaluation["strengths"] if str(item).strip()]
     evaluation["weaknesses"] = [str(item).strip() for item in evaluation["weaknesses"] if str(item).strip()]
     evaluation["summary"] = evaluation["summary"].strip()
+    evaluation.update(_aggregate_final_signals(summary, evaluation))
     return evaluation
+
+
+LEVEL_SCORES = {"high": 100, "medium": 70, "low": 40}
+
+
+def _average(values):
+    return round(sum(values) / len(values)) if values else None
+
+
+def _speech_score(speech):
+    if not isinstance(speech, dict):
+        return None
+    scores = []
+    for field in ("clarity", "fluency", "fillerUsage", "repetition"):
+        if speech.get(field) in LEVEL_SCORES:
+            scores.append(LEVEL_SCORES[speech[field]])
+    pace_scores = {"slow": 70, "normal": 100, "fast": 70}
+    if speech.get("speakingPace") in pace_scores:
+        scores.append(pace_scores[speech["speakingPace"]])
+    return _average(scores)
+
+
+def _aggregate_final_signals(summary, technical_evaluation):
+    technical_score = _average(
+        [LEVEL_SCORES[technical_evaluation[field]]
+        for field in ("technicalKnowledge", "answerQuality", "resumeConsistency", "topicCoverage")
+        ]
+    )
+    speech_scores = [
+        score
+        for response in summary.get("responses", [])
+        if isinstance(response, dict)
+        for score in [_speech_score(response.get("speech", {}))]
+        if score is not None
+    ]
+    communication = _average(speech_scores)
+
+    gaze_metrics = summary.get("gazeMetrics")
+    attention = None
+    if isinstance(gaze_metrics, dict):
+        on_screen = float(gaze_metrics.get("lookingAtScreenPercentage", 0) or 0)
+        away = float(gaze_metrics.get("lookingAwayPercentage", 0) or 0)
+        down = float(gaze_metrics.get("lookingDownPercentage", 0) or 0)
+        if on_screen + away + down > 0:
+            attention = round(on_screen + (away + down) * 0.5)
+
+    weighted_scores = [(technical_score, 0.7)]
+    if communication is not None:
+        weighted_scores.append((communication, 0.15))
+    if attention is not None:
+        weighted_scores.append((attention, 0.15))
+    weight_total = sum(weight for _, weight in weighted_scores)
+    overall_score = round(sum(score * weight for score, weight in weighted_scores) / weight_total)
+    recommendation = (
+        "strong" if overall_score >= 80
+        else "review" if overall_score >= 60
+        else "needs_improvement"
+    )
+    return {
+        "communication": communication,
+        "attention": attention,
+        "overallScore": overall_score,
+        "recommendation": recommendation,
+    }
 
 
 def generate_follow_up_question(question, answer, allow_clear=False):

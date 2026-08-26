@@ -58,8 +58,8 @@ class GazeHandler(BaseHTTPRequestHandler):
                 body = json.dumps({"state": processor.process_frame(frame)}).encode("utf-8")
             self.send_response(200)
         except Exception:
-            body = json.dumps({"faceCount": 0, "centered": False} if self.path == "/api/face/check" else {"state": None}).encode("utf-8")
-            self.send_response(503)
+            body = json.dumps({"faceCount": 0, "centered": False} if self.path == "/api/face/check" else {"state": "attention_unavailable"}).encode("utf-8")
+            self.send_response(200 if self.path == "/api/gaze/process" else 503)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

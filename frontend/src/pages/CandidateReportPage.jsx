@@ -16,6 +16,66 @@ function ReportCard({ title, children, className = '' }) {
     </section>
   )
 }
+function readSessionObject(key) {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(key) || 'null')
+    return value && typeof value === 'object' ? value : null
+  } catch {
+    return null
+  }
+}
+function EvaluationSignalCard({ label, value }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-2 text-lg font-black capitalize text-slate-950">
+        {value === null || value === undefined || value === '' ? 'Unavailable' : value}
+      </p>
+    </div>
+  )
+}
+function SpeechAnalysis({ responses }) {
+  const speechResponses = responses.filter((response) => response?.speech && typeof response.speech === 'object')
+  if (speechResponses.length === 0) return null
+  return (
+    <ReportCard title="Speech Analysis" className="mt-5">
+      <div className="mt-4 space-y-3">
+        {speechResponses.map((response, index) => (
+          <div key={`${response.questionIndex}-${response.type || 'main'}-${index}`} className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+              Question {Number(response.questionIndex) + 1} {response.type && `· ${response.type}`}
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {[
+                ['Clarity', response.speech.clarity],
+                ['Fluency', response.speech.fluency],
+                ['Speaking pace', response.speech.speakingPace],
+                ['Filler usage', response.speech.fillerUsage],
+                ['Repetition', response.speech.repetition],
+              ].map(([label, value]) => <EvaluationSignalCard key={label} label={label} value={value} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ReportCard>
+  )
+}
+function AttentionAnalysis({ gazeMetrics }) {
+  if (!gazeMetrics || typeof gazeMetrics !== 'object') return null
+  const states = [
+    ['Looking at screen', gazeMetrics.lookingAtScreenPercentage],
+    ['Looking away', gazeMetrics.lookingAwayPercentage],
+    ['Looking down', gazeMetrics.lookingDownPercentage],
+  ].filter(([, value]) => Number(value) > 0)
+  if (states.length === 0) return null
+  return (
+    <ReportCard title="Attention" className="mt-5">
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {states.map(([label]) => <EvaluationSignalCard key={label} label={label} value="Observed" />)}
+      </div>
+    </ReportCard>
+  )
+}
 function ReportScoreCard({ item }) {
   const Icon = item.icon
   return (
@@ -209,6 +269,11 @@ function ReportInsightList({ title, items, icon: Icon, tone }) {
   )
 }
 function CandidateReportPage({ candidate, onExit }) {
+  const summary = readSessionObject('ai-interview-summary') || {}
+  const evaluation = candidate.evaluation || readSessionObject('ai-interview-evaluation')
+  const responses = Array.isArray(summary.responses) ? summary.responses : []
+  const strengths = Array.isArray(evaluation?.strengths) ? evaluation.strengths : []
+  const weaknesses = Array.isArray(evaluation?.weaknesses) ? evaluation.weaknesses : []
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -244,16 +309,20 @@ function CandidateReportPage({ candidate, onExit }) {
               <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                 Overall Score
               </p>
-              <p className="mt-3 text-6xl font-black tracking-tight">86</p>
+              <p className="mt-3 text-6xl font-black tracking-tight">
+                {Number.isFinite(evaluation?.overallScore) ? evaluation.overallScore : '—'}
+              </p>
               <p className="mt-2 text-sm font-bold text-cyan-200">
-                {candidateReportData.recommendation}
+                {evaluation?.recommendation || 'Evaluation unavailable'}
               </p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
               <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                 Executive Summary
               </p>
-              <p className="mt-3 text-sm leading-7 text-slate-700">{candidateReportData.summary}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-700">
+                {evaluation?.summary || 'Interview evaluation is unavailable.'}
+              </p>
               <p className="mt-4 text-xs font-bold text-slate-500">
                 Generated: {candidateReportData.generatedAt} · Resume: {candidate.resumeName}
               </p>
@@ -262,62 +331,37 @@ function CandidateReportPage({ candidate, onExit }) {
               <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">
                 HR Decision
               </p>
-              <p className="mt-3 text-2xl font-black text-emerald-950">Proceed</p>
+              <p className="mt-3 text-2xl font-black capitalize text-emerald-950">
+                {evaluation?.recommendation || 'Unavailable'}
+              </p>
               <p className="mt-2 text-sm leading-6 text-emerald-800">
-                Candidate is ready for final technical validation with senior engineering panel.
+                Recommendation is based on the completed interview evaluation.
               </p>
             </div>
           </div>
         </header>
-        {candidate.evaluation && (
+        {evaluation && (
           <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Technical Evaluation</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Evaluation Scores</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[
-                ['Technical Knowledge', candidate.evaluation.technicalKnowledge],
-                ['Answer Quality', candidate.evaluation.answerQuality],
-                ['Resume Consistency', candidate.evaluation.resumeConsistency],
-                ['Topic Coverage', candidate.evaluation.topicCoverage],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>
-                  <p className="mt-2 text-lg font-black capitalize text-slate-950">{value}</p>
-                </div>
-              ))}
+                ['Technical Knowledge', evaluation.technicalKnowledge],
+                ['Communication', evaluation.communication],
+                ['Answer Quality', evaluation.answerQuality],
+                ['Resume Consistency', evaluation.resumeConsistency],
+                ['Topic Coverage', evaluation.topicCoverage],
+                ['Attention', evaluation.attention],
+              ].map(([label, value]) => <EvaluationSignalCard key={label} label={label} value={value} />)}
             </div>
-            <p className="mt-4 text-sm leading-7 text-slate-700">{candidate.evaluation.summary}</p>
+            <p className="mt-4 text-sm leading-7 text-slate-700">{evaluation.summary}</p>
           </section>
         )}
-        <section className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {candidateReportData.scores.map((item) => (
-            <ReportScoreCard key={item.label} item={item} />
-          ))}
-        </section>
-        <section className="mt-5 grid gap-5 lg:grid-cols-2">
-          <CandidateReportRadarChart />
-          <CandidateReportTimelineChart />
-          <QuestionWisePerformance />
-        </section>
-        <section className="mt-5 grid gap-5 lg:grid-cols-3">
-          <ReportInsightList
-            title="Strengths"
-            items={candidateReportData.strengths}
-            icon={CheckCircle2}
-            tone="strength"
-          />
-          <ReportInsightList
-            title="Weaknesses"
-            items={candidateReportData.weaknesses}
-            icon={FileWarning}
-            tone="weakness"
-          />
-          <ReportInsightList
-            title="AI Suggestions"
-            items={candidateReportData.suggestions}
-            icon={Sparkles}
-            tone="suggestion"
-          />
-        </section>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <ReportInsightList title="Strengths" items={strengths} icon={CheckCircle2} tone="strength" />
+          <ReportInsightList title="Areas to Improve" items={weaknesses} icon={FileWarning} tone="weakness" />
+        </div>
+        <SpeechAnalysis responses={responses} />
+        <AttentionAnalysis gazeMetrics={summary.gazeMetrics} />
       </div>
     </main>
   )

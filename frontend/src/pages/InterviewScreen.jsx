@@ -446,7 +446,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           return
         }
         const state = (await response.json())?.state
-        if (state === 'attention_unavailable') {
+        if (state === 'attention_unavailable' || state === 'multiple_faces') {
           recordMonitoringState('no-face')
           return
         }

@@ -130,11 +130,12 @@ def finalize_current_phase(calibration):
 class GazeProcessor:
     def __init__(self):
         self.face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False, max_num_faces=1, refine_landmarks=True,
+            static_image_mode=False, max_num_faces=2, refine_landmarks=True,
             min_detection_confidence=0.5, min_tracking_confidence=0.5,
         )
         self.calibration = build_calibration_state()
         self.gaze_history = deque(maxlen=VOTING_WINDOW_SIZE)
+        self.state_history = deque(maxlen=3)
         self.gaze_stability_window = deque(maxlen=GAZE_STABILITY_WINDOW)
         self.eye_contact_history = deque(maxlen=EYE_CONTACT_STABILITY_FRAMES)
         self.eye_contact_score_window = deque(maxlen=EYE_CONTACT_PERCENTAGE_WINDOW)
@@ -155,10 +156,15 @@ class GazeProcessor:
         results = self.face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if not self.calibration["ready"] and time.perf_counter() - self.calibration["phase_start"] >= CALIBRATION_STEP_SECONDS:
             finalize_current_phase(self.calibration)
-        if not results.multi_face_landmarks:
+        face_landmarks = results.multi_face_landmarks or []
+        if len(face_landmarks) > 1:
+            self.state_history.clear()
+            return "multiple_faces"
+        if not face_landmarks:
+            self.state_history.clear()
             return "attention_unavailable"
 
-        landmarks = extract_landmarks(results.multi_face_landmarks[0], width, height)
+        landmarks = extract_landmarks(face_landmarks[0], width, height)
         iris = get_iris_points(landmarks)
         left_center, right_center = iris["left_center"], iris["right_center"]
         if self.last_left_center is not None:
@@ -202,11 +208,19 @@ class GazeProcessor:
         if result["confidence"] >= 60:
             self.direction_state = {"last": result["direction"], "confidence": result["confidence"]}
         result["direction"] = self.direction_state["last"]
-        self.last_state = {
+        next_state = {
             "Looking On Screen": "looking_at_screen",
             "Looking Away": "looking_away",
             "Looking Down": "looking_down",
-        }.get(result["direction"], self.last_state)
+        }.get(result["direction"])
+        if next_state is None:
+            self.state_history.clear()
+            return "attention_unavailable"
+        self.state_history.append(next_state)
+        self.last_state = max(
+            set(self.state_history),
+            key=lambda state: (self.state_history.count(state), -list(self.state_history)[::-1].index(state)),
+        )
         return self.last_state
 
     def close(self):
