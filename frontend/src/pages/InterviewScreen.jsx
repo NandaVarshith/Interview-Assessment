@@ -224,16 +224,14 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, pulse, moni
         </p>
       </div>
       <div className="relative h-[min(58vh,520px)] min-h-[280px] overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_24%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827_50%,#0f172a)] shadow-[0_30px_110px_rgba(0,0,0,0.34)] lg:min-h-[420px]">
-        {cameraOn && (
-          <video
-            ref={videoRef}
-            className="absolute inset-0 h-full w-full object-cover"
-            autoPlay
-            muted
-            playsInline
-            aria-label="Live camera preview"
-          />
-        )}
+        <video
+          ref={videoRef}
+          className={`absolute inset-0 h-full w-full object-cover ${cameraOn ? '' : 'hidden'}`}
+          autoPlay
+          muted
+          playsInline
+          aria-label="Live camera preview"
+        />
         <div className="absolute left-5 top-5 flex items-center gap-2 rounded-full bg-black/35 px-3 py-2 text-xs font-black text-white backdrop-blur">
           <span className={`h-2 w-2 rounded-full ${isRecording ? 'animate-pulse bg-red-400' : 'bg-emerald-400'}`} />
           {isRecording ? 'Recording' : 'Camera ready'}
