@@ -53,8 +53,8 @@ class GazeProcessorStateTests(unittest.TestCase):
         eye = {"horizontal": 0.5, "vertical": 0.5, "top_ratio": 0.5, "bottom_ratio": 0.5, "opening_ratio": 0.5}
         iris = {"left_center": np.array([1, 1]), "right_center": np.array([1, 1])}
         geometry = {"left": {}, "right": {}}
-        head_pose = {"yaw": 0.0, "pitch": 0.0}
-        gaze_result = lambda: {"direction": next(directions), "confidence": 100}
+        head_pose = {"yaw": 0.0, "pitch": 0.0, "confidence": 1.0}
+        gaze_result = lambda: {"direction": next(directions), "confidence": 100, "stability": 100}
         with patch.object(gaze_processor, "extract_landmarks", return_value=np.zeros((478, 2))), \
             patch.object(gaze_processor, "get_iris_points", return_value=iris), \
             patch.object(gaze_processor, "get_eye_geometry", return_value=geometry), \
@@ -65,6 +65,43 @@ class GazeProcessorStateTests(unittest.TestCase):
             patch.object(gaze_processor, "classify_gaze", side_effect=lambda *args: gaze_result()):
             states = [processor.process_frame(np.zeros((10, 10, 3), dtype=np.uint8)) for _ in range(3)]
         self.assertEqual(states, ["looking_at_screen", "looking_away", "looking_away"])
+
+    def test_low_tracking_quality_is_unavailable(self):
+        processor = self.make_processor([object()])
+        eye = {"horizontal": 0.5, "vertical": 0.5, "top_ratio": 0.5, "bottom_ratio": 0.5, "opening_ratio": 0.5}
+        iris = {"left_center": np.array([1, 1]), "right_center": np.array([1, 1])}
+        geometry = {"left": {}, "right": {}}
+        with patch.object(gaze_processor, "extract_landmarks", return_value=np.zeros((478, 2))), \
+            patch.object(gaze_processor, "get_iris_points", return_value=iris), \
+            patch.object(gaze_processor, "get_eye_geometry", return_value=geometry), \
+            patch.object(gaze_processor, "eye_ratio_features", return_value=eye), \
+            patch.object(gaze_processor, "solve_head_pose", return_value={"yaw": 0.0, "pitch": 0.0, "confidence": 0.1}), \
+            patch.object(gaze_processor, "calculate_ear", return_value=1.0), \
+            patch.object(gaze_processor, "gaze_model_from_calibration", return_value={}), \
+            patch.object(gaze_processor, "classify_gaze", return_value={"direction": "Looking On Screen", "confidence": 0, "stability": 0}):
+            state = processor.process_frame(np.zeros((10, 10, 3), dtype=np.uint8))
+        self.assertEqual(state, "attention_unavailable")
+
+    def test_moderate_head_confidence_can_remain_usable(self):
+        processor = self.make_processor([object()])
+        eye = {"horizontal": 0.5, "vertical": 0.5, "top_ratio": 0.5, "bottom_ratio": 0.5, "opening_ratio": 0.5}
+        iris = {"left_center": np.array([1, 1]), "right_center": np.array([1, 1])}
+        geometry = {"left": {}, "right": {}}
+        with patch.object(gaze_processor, "extract_landmarks", return_value=np.zeros((478, 2))), \
+            patch.object(gaze_processor, "get_iris_points", return_value=iris), \
+            patch.object(gaze_processor, "get_eye_geometry", return_value=geometry), \
+            patch.object(gaze_processor, "eye_ratio_features", return_value=eye), \
+            patch.object(gaze_processor, "solve_head_pose", return_value={"yaw": 0.0, "pitch": 0.0, "confidence": 0.5}), \
+            patch.object(gaze_processor, "calculate_ear", return_value=1.0), \
+            patch.object(gaze_processor, "gaze_model_from_calibration", return_value={}), \
+            patch.object(gaze_processor, "classify_gaze", return_value={"direction": "Looking On Screen", "confidence": 100, "stability": 100}):
+            state = processor.process_frame(np.zeros((10, 10, 3), dtype=np.uint8))
+        self.assertEqual(state, "looking_at_screen")
+
+    def test_tracking_quality_uses_weighted_measurements(self):
+        self.assertEqual(gaze_processor.calculate_tracking_quality(100, 80, 0), 64)
+        self.assertGreaterEqual(gaze_processor.calculate_tracking_quality(100, 50, 100), 50)
+        self.assertLess(gaze_processor.calculate_tracking_quality(0, 10, 0), 50)
 
 
 if __name__ == "__main__":

@@ -54,6 +54,14 @@ def build_calibration_state():
     }
 
 
+def calculate_tracking_quality(gaze_confidence, head_pose_confidence, gaze_stability):
+    """Return measurement reliability, not candidate performance."""
+    values = [max(0.0, min(100.0, float(value))) for value in (
+        gaze_confidence, head_pose_confidence, gaze_stability,
+    )]
+    return round(0.40 * values[0] + 0.30 * values[1] + 0.30 * values[2])
+
+
 def active_phase(calibration):
     return CALIBRATION_STEPS[min(calibration["phase_index"], len(CALIBRATION_STEPS) - 1)]
 
@@ -149,10 +157,12 @@ class GazeProcessor:
         self.blink_counter = 0
         self.blink_freeze_frames = 0
         self.last_state = "looking_at_screen"
+        self.last_quality = 0
 
     def process_frame(self, frame):
         if frame is None or not hasattr(frame, "shape") or getattr(frame, "size", 0) == 0:
             self.state_history.clear()
+            self.last_quality = 0
             return "attention_unavailable"
         frame = cv2.flip(frame, 1)
         height, width, _ = frame.shape
@@ -162,9 +172,11 @@ class GazeProcessor:
         face_landmarks = results.multi_face_landmarks or []
         if len(face_landmarks) > 1:
             self.state_history.clear()
+            self.last_quality = 0
             return "multiple_faces"
         if not face_landmarks:
             self.state_history.clear()
+            self.last_quality = 0
             return "attention_unavailable"
 
         landmarks = extract_landmarks(face_landmarks[0], width, height)
@@ -208,6 +220,13 @@ class GazeProcessor:
             for key, value in {"h": raw_horizontal, "v": raw_vertical, "top": top_ratio, "bottom": bottom_ratio, "opening": opening_ratio, "yaw": head_pose["yaw"], "pitch": head_pose["pitch"], "ear": ear}.items():
                 samples[key].append(value)
         result = classify_gaze(features, gaze_model_from_calibration(self.calibration), self.gaze_history)
+        gaze_confidence = result.get("confidence", 0)
+        head_pose_confidence = clamp(head_pose.get("confidence", 0.0)) * 100
+        gaze_stability = result.get("stability", 0)
+        self.last_quality = calculate_tracking_quality(gaze_confidence, head_pose_confidence, gaze_stability)
+        if self.last_quality < 50:
+            self.state_history.clear()
+            return "attention_unavailable"
         if result["confidence"] >= 60:
             self.direction_state = {"last": result["direction"], "confidence": result["confidence"]}
         result["direction"] = self.direction_state["last"]
