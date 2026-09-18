@@ -100,17 +100,6 @@ def build_templates(calibration):
     return templates
 
 
-def estimate_template_spread(templates):
-    if len(templates) < 2:
-        return 0.18
-    vectors = [np.asarray(item["vector"], dtype=np.float32) for item in templates.values()]
-    distances = []
-    for index, vector in enumerate(vectors):
-        for other in vectors[index + 1:]:
-            distances.append(float(np.linalg.norm(vector - other)))
-    return max(0.08, float(np.median(distances)) if distances else 0.18)
-
-
 def finalize_current_phase(calibration):
     phase = active_phase(calibration)
     samples = calibration["samples"][phase]
@@ -143,7 +132,6 @@ def finalize_current_phase(calibration):
         calibration["values"]["horizontal_gain"] = estimate_gain(calibration["samples"]["center"]["yaw"], calibration["samples"]["center"]["h"])
         calibration["values"]["vertical_gain"] = estimate_gain(calibration["samples"]["center"]["pitch"], calibration["samples"]["center"]["v"])
         calibration["values"]["templates"] = build_templates(calibration)
-        calibration["values"]["template_spread"] = estimate_template_spread(calibration["values"]["templates"])
         calibration["ready"] = True
 
 
@@ -159,9 +147,6 @@ class GazeProcessor:
         self.gaze_stability_window = deque(maxlen=GAZE_STABILITY_WINDOW)
         self.eye_contact_history = deque(maxlen=EYE_CONTACT_STABILITY_FRAMES)
         self.eye_contact_score_window = deque(maxlen=EYE_CONTACT_PERCENTAGE_WINDOW)
-        self.blink_score_window = deque(maxlen=300)
-        self.head_score_window = deque(maxlen=300)
-        self.attention_history = deque(maxlen=300)
         self.raw_horizontal_window = deque(maxlen=ROLLING_WINDOW_SIZE)
         self.raw_vertical_window = deque(maxlen=ROLLING_WINDOW_SIZE)
         self.head_state = {"last": None, "history": deque(maxlen=5)}
@@ -171,7 +156,6 @@ class GazeProcessor:
         self.last_right_center = None
         self.blink_counter = 0
         self.blink_freeze_frames = 0
-        self.blink_total = 0
         self.last_state = "looking_at_screen"
         self.last_quality = 0
 
@@ -238,86 +222,19 @@ class GazeProcessor:
         result = classify_gaze(features, gaze_model_from_calibration(self.calibration), self.gaze_history)
         gaze_confidence = result.get("confidence", 0)
         head_pose_confidence = clamp(head_pose.get("confidence", 0.0)) * 100
-        self.gaze_stability_window.append(result.get("corrected_horizontal", raw_horizontal))
-        self.gaze_stability_window.append(result.get("corrected_vertical", raw_vertical))
-        rolling_gaze_stability = max(
-            0.0,
-            100.0 - rolling_std(self.gaze_stability_window, 0.0) * 240.0,
-        )
-        # Keep the classifier's confidence gate as a conservative startup guard.
-        gaze_stability = min(rolling_gaze_stability, result.get("stability", 100))
-
-        head_direction_state = getattr(
-            self,
-            "head_direction_state",
-            {"last": "Head Forward", "confidence": 100},
-        )
-        head_direction = head_direction_state["last"]
-        head_confidence = int(round(head_pose_confidence))
-        if head_confidence >= 60:
-            self.head_direction_state = {
-                "last": head_pose.get("direction", "Head Forward"),
-                "confidence": head_confidence,
-            }
-            head_direction = self.head_direction_state["last"]
-
-        blink_score = 100.0 if not blink_active else max(
-            0.0,
-            100.0 - ((self.calibration["values"]["blink_threshold"] - ear)
-                      / max(self.calibration["values"]["blink_threshold"], 1e-6)) * 100.0,
-        )
-        blink_score_window = getattr(self, "blink_score_window", None)
-        if blink_score_window is None:
-            self.blink_score_window = deque(maxlen=300)
-            blink_score_window = self.blink_score_window
-        blink_score_window.append(blink_score)
-        blink_confidence = int(round(rolling_mean(blink_score_window, blink_score)))
-        head_score = head_confidence
-        head_score_window = getattr(self, "head_score_window", None)
-        if head_score_window is None:
-            self.head_score_window = deque(maxlen=300)
-            head_score_window = self.head_score_window
-        head_score_window.append(head_score)
-        head_score_smooth = rolling_mean(head_score_window, head_score)
-
-        eye_contact_now = (
-            head_direction == "Head Forward"
-            and result.get("direction") == "Looking On Screen"
-            and gaze_confidence >= 60
-            and head_confidence >= 60
-            and not blink_active
-            and self.blink_freeze_frames == 0
-        )
-        self.eye_contact_history.append(1 if eye_contact_now else 0)
-        self.eye_contact_score_window.append(1 if eye_contact_now else 0)
-        eye_contact_score = 100.0 * sum(self.eye_contact_history) / max(1, len(self.eye_contact_history))
-
-        # Match app.py's tracking measurement: pose reliability plus gaze stability.
-        self.last_quality = round(min(100.0, 0.5 * head_confidence + 0.5 * gaze_stability))
+        gaze_stability = result.get("stability", 0)
+        self.last_quality = calculate_tracking_quality(gaze_confidence, head_pose_confidence, gaze_stability)
         if self.last_quality < 50:
-            self.state_history.clear()
-            return "attention_unavailable"
-        if blink_active or self.blink_freeze_frames > 0:
             self.state_history.clear()
             return "attention_unavailable"
         if result["confidence"] >= 60:
             self.direction_state = {"last": result["direction"], "confidence": result["confidence"]}
         result["direction"] = self.direction_state["last"]
-
-        # Head pose supplies reliable directional labels not emitted by classify_gaze.
-        directional_state = {
-            "Head Left": "looking_left",
-            "Head Right": "looking_right",
-            "Head Up": "looking_up",
-            "Head Down": "looking_down",
-        }.get(head_direction)
         next_state = {
             "Looking On Screen": "looking_at_screen",
             "Looking Away": "looking_away",
             "Looking Down": "looking_down",
         }.get(result["direction"])
-        if directional_state and head_confidence >= 60 and gaze_confidence >= 60 and gaze_stability >= 60:
-            next_state = directional_state
         if next_state is None:
             self.state_history.clear()
             return "attention_unavailable"

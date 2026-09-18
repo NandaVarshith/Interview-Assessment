@@ -64,10 +64,7 @@ class GazeHandler(BaseHTTPRequestHandler):
                     quality = processor.last_quality
                 body = json.dumps({
                     "state": state,
-                    "valid": state in {
-                        "looking_at_screen", "looking_away", "looking_down",
-                        "looking_left", "looking_right", "looking_up",
-                    },
+                    "valid": state in {"looking_at_screen", "looking_away", "looking_down"},
                     "quality": quality,
                 }).encode("utf-8")
             self.send_response(200)
