@@ -25,6 +25,7 @@ ai-services/vision/venv/
 # Logs and runtime output
 *.log
 logs/
+backend/experiment_exports/
 tmp/
 temp/
 

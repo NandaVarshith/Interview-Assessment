@@ -593,8 +593,9 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           const result = await transcribeInterviewAudio(new Blob(chunks, { type: mimeType }), durationSeconds)
           const combinedAnswer = [answerDraft.trim(), result.transcript.trim()].filter(Boolean).join('\n')
           const responseType = crossQuestion ? 'cross-question' : followUpQuestion ? 'follow-up' : 'main'
-          setSpeechMetrics({ ...result, questionIndex: currentQuestionIndex, type: responseType })
-          updateAnswer(combinedAnswer, result)
+          const measuredSpeech = { ...result, capturedAt: new Date().toISOString() }
+          setSpeechMetrics({ ...measuredSpeech, questionIndex: currentQuestionIndex, type: responseType })
+          updateAnswer(combinedAnswer, measuredSpeech)
           setSpeechStatus(`Transcript ready (${result.wordCount} words)`)
         } catch (error) {
           setSpeechStatus(error instanceof Error ? error.message : 'Speech processing unavailable.')
@@ -630,7 +631,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         && item.action === decision.action
         && item.question === decision.question
       )),
-      { ...decision, questionIndex: currentQuestionIndex },
+      { ...decision, questionIndex: currentQuestionIndex, decidedAt: new Date().toISOString() },
     ]
     setDecisions(nextDecisions)
     window.sessionStorage.setItem('ai-interview-decisions', JSON.stringify(nextDecisions))
@@ -663,6 +664,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       ].includes(key)),
     )
     const summary = {
+      interviewId: window.crypto?.randomUUID?.() || `interview-${Date.now()}`,
       candidate: candidateInfo,
       questions: interviewQuestions,
       responses: completedResponses,

@@ -20,6 +20,7 @@ from services.question_generator import (
 )
 from services.resume_parser import PDFExtractionError, extract_resume_profile, extract_text_from_pdf
 from services.speech_analyzer import analyze_speech
+from services.experiment_export import export_completed_interview
 
 
 load_dotenv()
@@ -55,10 +56,9 @@ def select_resume_claim(claims, context, used_indexes):
         if score:
             scored.append((index, score, index in used_indexes))
     unused = [item for item in scored if not item[2]]
-    candidates = unused or scored
-    if not candidates:
+    if not unused:
         return None
-    return max(candidates, key=lambda item: item[1])[0]
+    return max(unused, key=lambda item: item[1])[0]
 
 
 def _decision_answer_class(question, answer):
@@ -107,12 +107,6 @@ def _question_was_asked(question, responses):
 
 
 def filter_resume_claims(claims):
-    technical_terms = {
-        "api", "backend", "frontend", "react", "node", "flask", "django", "spring", "java", "python",
-        "sql", "mysql", "postgresql", "mongodb", "database", "jwt", "oauth", "authentication", "security",
-        "machine", "learning", "model", "tensorflow", "pytorch", "performance", "scalable", "optimization",
-        "deployment", "docker", "kubernetes", "cloud", "feature", "algorithm", "pipeline", "service",
-    }
     low_value_patterns = (
         r"\bteamwork\b",
         r"\bcollaborat(?:e|ed|ion|ing)\b",
@@ -126,13 +120,8 @@ def filter_resume_claims(claims):
         normalized = re.sub(r"\s+", " ", str(claim)).strip(" .;,-")
         lowered = normalized.lower()
         tokens = set(re.findall(r"[a-z0-9+#.]+", lowered))
-        if len(normalized) < 35 or len(tokens) < 5:
+        if len(normalized) < 35 or len(tokens) < 5 or any(re.search(pattern, lowered) for pattern in low_value_patterns):
             continue
-        technical = tokens & technical_terms
-        if not technical or any(re.search(pattern, lowered) for pattern in low_value_patterns):
-            strong_terms = technical & {"api", "backend", "frontend", "authentication", "security", "database", "model", "performance", "scalable", "optimization", "pipeline"}
-            if not strong_terms:
-                continue
         if any(len(tokens & previous) / min(len(tokens), len(previous)) >= 0.8 for previous in token_sets):
             continue
         filtered.append(normalized)
@@ -355,6 +344,7 @@ def interview_decision():
                 "resumeClaim": resume_claim,
                 "claimIndex": claim_index,
                 "evaluation": evaluation,
+                "answerClass": answer_class,
             }), 200
 
         if not follow_up_question and (answer_class in {"vague", "insufficient", "shallow"} or low_evaluation or missing_depth):
@@ -372,6 +362,7 @@ def interview_decision():
                     "difficulty": "basic" if answer_class == "insufficient" else "medium",
                     "source": "follow-up",
                     "evaluation": evaluation,
+                    "answerClass": answer_class,
                 }), 200
     except QuestionGenerationError as exc:
         app.logger.exception("Interview decision generation failed: %s", exc)
@@ -388,6 +379,7 @@ def interview_decision():
         "difficulty": "medium",
         "source": "planned" if planned_questions else None,
         "evaluation": evaluation,
+        "answerClass": answer_class,
     }), 200
 
 
@@ -412,6 +404,23 @@ def evaluate_interview():
         app.logger.exception("Unexpected final interview evaluation failure")
         return error_response("Unexpected server error while evaluating the interview.", 500)
     return jsonify(evaluation), 200
+
+
+@app.post("/api/experiments/export")
+def export_experiment():
+    payload = request.get_json(silent=True) or {}
+    summary = payload.get("summary")
+    evaluation = payload.get("evaluation")
+    if not isinstance(summary, dict) or (evaluation is not None and not isinstance(evaluation, dict)):
+        return error_response("A completed interview summary and optional evaluation are required.", 400)
+    try:
+        result = export_completed_interview(summary, evaluation)
+    except ValueError as exc:
+        return error_response(str(exc), 400)
+    except OSError:
+        app.logger.exception("Experiment export failed")
+        return error_response("Unable to write experiment export files.", 500)
+    return jsonify({"status": "success", **result}), 200
 
 
 @app.post("/api/interview/prepare")
@@ -468,12 +477,18 @@ def prepare_interview():
                 pass
 
     app.logger.info("prepare stage=response returned status=200")
-    resume_claims = [
-        claim
-        for section in (resume_profile.get("projects", []), resume_profile.get("experience", []))
-        for claim in section
-        if claim
-    ]
+    resume_claims = list(resume_profile.get("resume_claims", []))
+    if not resume_claims:
+        resume_claims = [
+            claim
+            for section in (
+                resume_profile.get("projects", []),
+                resume_profile.get("experience", []),
+                resume_profile.get("certifications", []),
+            )
+            for claim in section
+            if claim
+        ]
     resume_claims = filter_resume_claims(resume_claims)
     return jsonify({"status": "success", "questions": questions, "resumeClaims": resume_claims}), 200
 

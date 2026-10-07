@@ -11,18 +11,45 @@ class QuestionGenerationError(Exception):
 
 def _build_prompt(resume_text, resume_profile):
     summary = {
+        "field": resume_profile.get("field"),
+        "degree": resume_profile.get("degree"),
+        "specialization": resume_profile.get("specialization"),
+        "technical_topics": resume_profile.get("technical_topics", resume_profile.get("skills", [])),
+        "core_subjects": resume_profile.get("core_subjects", []),
+        "programming_skills": resume_profile.get("programming_skills", []),
+        "frameworks_tools": resume_profile.get("frameworks_tools", []),
+        "databases": resume_profile.get("databases", []),
+        "technical_domains": resume_profile.get("technical_domains", []),
+        "domain_knowledge": resume_profile.get("domain_knowledge", []),
         "skills": resume_profile.get("skills", []),
         "technologies": resume_profile.get("technologies", []),
         "projects": resume_profile.get("projects", []),
         "education": resume_profile.get("education", []),
         "experience": resume_profile.get("experience", []),
+        "certifications": resume_profile.get("certifications", []),
+        "resume_claims": resume_profile.get("resume_claims", []),
         "key_terms": resume_profile.get("key_terms", []),
     }
     limited_text = resume_text[:6000]
     return f"""
-You are an interview assistant for a student project.
+You are a field-agnostic technical interview assistant.
 Create 5 to 10 personalized INITIAL technical interview questions only.
-Use the candidate's actual resume content. Do not ask behavioral questions, scoring questions, or adaptive follow-up questions.
+Infer the candidate's discipline and technical topics from the supplied resume. The field may be software,
+electronics, electrical, mechanical, civil, chemical, biotechnology, aerospace, or another technical discipline.
+Do not assume a specific field or interpret technical skill as software skill.
+Prioritize relevant technical topics and core/domain concepts, then tools and technologies, then project implementation
+and targeted resume-claim validation. Projects are supporting evidence and must not dominate the question set.
+Build a balanced question set: begin with core subjects, fundamentals, programming or technical skills explicitly
+supported by the resume, and then cover frameworks, tools, databases, and domains. Include project questions only as
+targeted evidence after broader technical coverage. Avoid chains of narrow implementation questions about one project
+feature; ask at most one broad project question before returning to another technical topic.
+Each question must be one short, direct, independently answerable sentence testing one primary concept. A natural
+comparison question is acceptable when the comparison is the single concept. Do not combine separate questions with
+"and", "also", "additionally", or multiple unrelated clauses. Vary the set across definitions, differences, why/how,
+application, design, project, and targeted resume-claim questions when the resume supports them. Include a realistic
+mix of basic, intermediate, and more challenging questions, but do not make every question advanced. Prefer breadth
+across uncovered technical topics before deeper project detail. Do not repeat or paraphrase another question.
+Use only evidence from the candidate's resume. Do not ask behavioral questions, scoring questions, or adaptive follow-up questions.
 
 Return strict JSON in this shape:
 {{"questions":["question 1","question 2"]}}
@@ -47,10 +74,13 @@ def _parse_questions(content):
         raise QuestionGenerationError("LLM did not return a valid question list.")
 
     cleaned = []
+    seen = set()
     for item in questions:
         question = str(item).strip()
-        if question:
+        normalized = re.sub(r"[^a-z0-9]+", " ", question.lower()).strip()
+        if question and normalized not in seen:
             cleaned.append(question)
+            seen.add(normalized)
 
     if len(cleaned) < 5 or len(cleaned) > 10:
         raise QuestionGenerationError("LLM returned an invalid number of questions.")
@@ -119,7 +149,7 @@ def evaluate_answer(question, answer, context=""):
     base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=base_url)
     prompt = f"""
-Evaluate the candidate's answer for a junior software engineering interview.
+Evaluate the candidate's answer for a technical interview appropriate to the candidate's resume and discipline.
 Return strict JSON only in this shape:
 {{"correctness":"high|medium|low","relevance":"high|medium|low","depth":"high|medium|low","missingConcepts":[],"summary":"short explanation"}}
 Assess correctness, relevance to the question, and practical depth. Do not assign a numerical score,
@@ -322,13 +352,14 @@ def generate_follow_up_question(question, answer, allow_clear=False):
     base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=base_url)
     prompt = f"""
-Create exactly one concise technical follow-up question for a {answer_class} answer.
+Create exactly one concise technical follow-up question for a {answer_class} answer within the current resume-supported technical topic.
 For a vague answer, ask for one important missing implementation detail.
 For an insufficient answer, ask one simple fundamental clarification question; do not assume advanced experience.
 For a clear but shallow answer, ask one practical probe for the most important missing implementation detail.
-Target a fresher or junior software engineer at basic-to-medium difficulty.
+Target the candidate's demonstrated academic or technical level at basic-to-medium difficulty.
 Focus on one practical implementation concept from the candidate's answer and keep it answerable in about 30 to 90 seconds.
 Probe only one level deeper when the answer supports it; do not introduce technologies or experience not present in the conversation or resume context.
+Prefer a core concept or broad technical principle before a narrow project implementation detail. Do not create a chain of micro-questions about one project feature.
 Avoid advanced system design, distributed architecture, obscure framework internals, highly theoretical topics, and competitive-programming questions.
 Do not repeat the original question. Return only the question text, with no numbering or explanation.
 
@@ -371,10 +402,11 @@ def generate_cross_question(resume_claim, question, answer):
     base_url = os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
     client = OpenAI(api_key=api_key, base_url=base_url)
     prompt = f"""
-Create exactly one concise technical verification question.
+Create exactly one concise technical verification question for the candidate's actual discipline.
 Verify the resume claim, check the candidate's technical understanding, and connect the claim with the candidate's answer.
-Target a fresher or junior software engineer at basic-to-medium difficulty.
+Target the candidate's demonstrated academic or technical level at basic-to-medium difficulty.
 Prefer one practical implementation question that can normally be answered in about 30 to 90 seconds.
+Keep project verification targeted and bounded; after one focused claim check, prefer another uncovered technical topic over additional micro-implementation details.
 Ask deeper questions only when the candidate's answer demonstrates the necessary understanding.
 Do not introduce technologies, assumptions, or experience not present in the resume claim or conversation.
 Avoid advanced system design, distributed architecture, obscure framework internals, highly theoretical topics, and competitive-programming questions.

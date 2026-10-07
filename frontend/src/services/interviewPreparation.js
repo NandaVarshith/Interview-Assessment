@@ -132,6 +132,17 @@ export async function evaluateInterviewSummary(summary) {
   return payload
 }
 
+export async function exportExperimentResults(summary, evaluation) {
+  const response = await fetch(`${apiBaseUrl}/api/experiments/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ summary, evaluation }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(payload?.message || 'Experiment export failed.')
+  return payload
+}
+
 export async function transcribeInterviewAudio(audioBlob, durationSeconds) {
   const formData = new FormData()
   formData.append('audio', audioBlob, 'interview-answer.webm')

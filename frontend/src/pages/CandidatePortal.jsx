@@ -8,7 +8,7 @@ import {
 import { Button } from '../components/ui/button'
 import { PROJECT_NAME, mockCandidateDefaults, systemCheckItems } from '../data/appData'
 import { saveCandidateForDevelopment, validateCandidateForm } from '../services/candidateStorage'
-import { evaluateInterviewSummary, prepareInterviewQuestions } from '../services/interviewPreparation'
+import { evaluateInterviewSummary, exportExperimentResults, prepareInterviewQuestions } from '../services/interviewPreparation'
 import { useSystemChecks } from '../services/systemChecks'
 import InterviewScreen from './InterviewScreen'
 import CandidateReportPage from './CandidateReportPage'
@@ -533,6 +533,11 @@ function CandidatePortal({ onExit }) {
             window.sessionStorage.setItem('ai-interview-evaluation', JSON.stringify(evaluation))
           } catch (error) {
             window.sessionStorage.removeItem('ai-interview-evaluation')
+            console.error(error)
+          }
+          try {
+            await exportExperimentResults(summary, evaluation)
+          } catch (error) {
             console.error(error)
           }
           setCandidate((current) => ({ ...current, responses, evaluation }))
