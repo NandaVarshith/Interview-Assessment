@@ -7,6 +7,8 @@
   --app-blue: #2563eb;
 }
 
+body { background: #07111f; }
+
 * { box-sizing: border-box; }
 
 ::selection {
@@ -28,6 +30,24 @@ input, textarea, select { accent-color: var(--app-blue); }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border: 3px solid #f1f5f9; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* The report uses the same dark workspace surfaces as the interview flow. */
+.dark-report .bg-white,
+.dark-report .bg-white\/90 { background-color: rgba(12, 26, 43, 0.94) !important; }
+.dark-report .bg-slate-50,
+.dark-report .bg-slate-100 { background-color: rgba(15, 31, 50, 0.88) !important; }
+.dark-report .border-slate-200,
+.dark-report .border-slate-200\/90 { border-color: rgba(148, 163, 184, 0.16) !important; }
+.dark-report .text-slate-950,
+.dark-report .text-slate-800 { color: #f8fafc !important; }
+.dark-report .text-slate-700 { color: #cbd5e1 !important; }
+.dark-report .text-slate-600,
+.dark-report .text-slate-500,
+.dark-report .text-slate-400 { color: #94a3b8 !important; }
+.dark-report .bg-emerald-50 { background-color: rgba(6, 78, 59, 0.34) !important; }
+.dark-report .border-emerald-100 { border-color: rgba(52, 211, 153, 0.2) !important; }
+.dark-report .text-emerald-950 { color: #d1fae5 !important; }
+.dark-report .text-emerald-800 { color: #a7f3d0 !important; }
 
 @media print {
   body { background: #fff; }

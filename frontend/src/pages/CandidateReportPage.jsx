@@ -275,7 +275,7 @@ function CandidateReportPage({ candidate, onExit }) {
   const strengths = Array.isArray(evaluation?.strengths) ? evaluation.strengths : []
   const weaknesses = Array.isArray(evaluation?.weaknesses) ? evaluation.weaknesses : []
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,#dbeafe_0%,transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f1f5f9_100%)] text-slate-950">
+    <main className="dark-report min-h-screen bg-[#07111f] text-slate-100">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-5">
