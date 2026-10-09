@@ -108,7 +108,6 @@ function AIInterviewerPanel({
   questionIndex,
   followUpQuestion,
   crossQuestion,
-  elapsedSeconds,
   answer,
   onAnswerChange,
   onStartRecording,
@@ -168,43 +167,12 @@ function AIInterviewerPanel({
           {followUpError && <p className="mt-2 text-xs font-semibold text-amber-200">{followUpError}</p>}
         </label>
       </div>
-      <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Timer</p>
-          <span className="rounded-full bg-cyan-300/10 px-3 py-1 text-xs font-black text-cyan-200">
-            Live
-          </span>
-        </div>
-        <p className="text-4xl font-black tracking-tight text-white">
-          {formatInterviewTime(elapsedSeconds)}
-        </p>
-      </div>
-      <div className="min-h-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-        <p className="mb-4 text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-          Previous Question History
-        </p>
-        <div className="space-y-3 overflow-auto pr-1">
-          {interviewQuestions.slice(0, questionIndex).length === 0 && (
-            <p className="rounded-xl bg-white/[0.05] p-3 text-sm font-semibold text-slate-500">
-              Previous questions will appear here.
-            </p>
-          )}
-          {interviewQuestions.slice(0, questionIndex).map((question, index) => (
-            <div key={question} className="rounded-xl border border-white/10 bg-white/[0.05] p-3">
-              <p className="text-[11px] font-black uppercase tracking-[0.12em] text-cyan-200">
-                Question {index + 1}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-300">{question}</p>
-            </div>
-          ))}
-        </div>
-      </div>
     </aside>
   )
 }
 function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, monitoringWarning, videoRef }) {
   return (
-    <section className="flex min-h-0 min-w-0 flex-col gap-4">
+    <section className="flex min-h-0 min-w-0 flex-col gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-4 backdrop-blur-2xl">
         <div>
           <p className="text-sm font-black text-white">Candidate Camera</p>
@@ -215,13 +183,7 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, monitoringW
           <InterviewStatusPill icon={Waves} label="Microphone" status={microphoneOn ? 'Clear' : 'Muted'} tone="cyan" />
         </div>
       </div>
-      <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Monitoring</p>
-        <p className={`mt-2 text-sm font-black ${monitoringWarning ? 'text-amber-200' : 'text-cyan-100'}`}>
-          {monitoringWarning || 'Interview monitoring active'}
-        </p>
-      </div>
-      <div className="relative h-[min(58vh,520px)] min-h-[280px] overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_50%_24%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827_50%,#0f172a)] shadow-[0_30px_110px_rgba(0,0,0,0.34)] lg:min-h-[420px]">
+      <div className="relative aspect-[4/5] min-h-[340px] w-full overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_24%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827_50%,#0f172a)]">
         <video
           ref={videoRef}
           className={`absolute inset-0 h-full w-full object-cover ${cameraOn ? '' : 'hidden'}`}
@@ -233,9 +195,6 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, monitoringW
         <div className="absolute left-5 top-5 flex items-center gap-2 rounded-full bg-black/35 px-3 py-2 text-xs font-black text-white backdrop-blur">
           <span className={`h-2 w-2 rounded-full ${isRecording ? 'animate-pulse bg-red-400' : 'bg-emerald-400'}`} />
           {isRecording ? 'Recording' : 'Camera ready'}
-        </div>
-        <div className="absolute right-5 top-5 rounded-full bg-black/35 px-3 py-2 text-xs font-black text-cyan-100 backdrop-blur">
-          HD Preview
         </div>
         {!cameraOn && (
           <>
@@ -249,23 +208,12 @@ function WebcamInterviewPanel({ cameraOn, microphoneOn, isRecording, monitoringW
             <div className="absolute left-[18%] right-[18%] top-[18%] h-[58%] rounded-[2rem] border border-white/10" />
           </>
         )}
-        <div className="absolute bottom-5 left-5 right-5 grid gap-3 sm:grid-cols-3">
-          {[
-            ['Face status', 'Unavailable'],
-            ['Audio level', 'Unavailable'],
-            ['Frame quality', 'Unavailable'],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl border border-white/10 bg-black/30 p-3 backdrop-blur">
-              <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-400">{label}</p>
-              <p className="mt-1 text-sm font-black text-white">{value}</p>
-            </div>
-          ))}
-        </div>
       </div>
+      <p className={`rounded-xl px-3 py-2 text-xs font-semibold ${monitoringWarning ? 'bg-amber-400/10 text-amber-200' : 'bg-emerald-400/10 text-emerald-200'}`}>{monitoringWarning || 'Monitoring is active. Keep your face visible and stay focused on the screen.'}</p>
     </section>
   )
 }
-function LiveEvaluationPanel() {
+export function LiveEvaluationPanel() {
   return (
     <aside className="min-h-0 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="mb-4 flex items-center justify-between">
@@ -306,7 +254,7 @@ function LiveEvaluationPanel() {
     </aside>
   )
 }
-function TranscriptPanel({ transcript }) {
+export function TranscriptPanel({ transcript }) {
   return (
     <section className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -333,7 +281,6 @@ function TranscriptPanel({ transcript }) {
 }
 function InterviewScreen({ candidate, onExit, onFinish }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [transcript] = useState([])
   const [questionIndex, setQuestionIndex] = useState(0)
   const interviewQuestions = candidate.generatedQuestions?.length
     ? candidate.generatedQuestions
@@ -846,7 +793,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
         }}
         onFinish={() => onFinish(completeResponses())}
       />
-      <div className="grid min-h-0 min-w-0 flex-1 items-start gap-4 p-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)_minmax(0,320px)]">
+      <div className="mx-auto grid w-full max-w-7xl min-h-0 min-w-0 flex-1 items-start gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] lg:p-6">
         <AIInterviewerPanel
           interviewQuestions={interviewQuestions}
           questionIndex={currentQuestionIndex}
@@ -869,10 +816,6 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           monitoringWarning={monitoringWarning}
           videoRef={gazeVideoRef}
         />
-        <LiveEvaluationPanel />
-      </div>
-      <div className="p-4 pt-0">
-        <TranscriptPanel transcript={transcript} />
       </div>
     </main>
   )

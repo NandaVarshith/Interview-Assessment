@@ -1,12 +1,30 @@
 import { motion } from 'framer-motion'
 import {
+  BrainCircuit,
   CheckCircle2,
+  Eye,
   FileBarChart,
   FileWarning,
+  MessageSquareText,
   Sparkles,
+  Target,
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
-import { candidateReportData } from '../data/appData'
+
+const LEVEL_SCORES = { high: 100, medium: 70, low: 40 }
+const asScore = (value) => {
+  if (Number.isFinite(value)) return Math.max(0, Math.min(100, Math.round(value)))
+  return LEVEL_SCORES[String(value || '').toLowerCase()] ?? null
+}
+const average = (values) => {
+  const available = values.filter(Number.isFinite)
+  return available.length ? Math.round(available.reduce((total, value) => total + value, 0) / available.length) : null
+}
+const formatReportDate = (value) => {
+  if (!value) return 'Unavailable'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Unavailable' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
 
 function ReportCard({ title, children, className = '' }) {
   return (
@@ -71,7 +89,7 @@ function AttentionAnalysis({ gazeMetrics }) {
   return (
     <ReportCard title="Attention" className="mt-5">
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {states.map(([label]) => <EvaluationSignalCard key={label} label={label} value="Observed" />)}
+        {states.map(([label, value]) => <EvaluationSignalCard key={label} label={label} value={`${Math.round(Number(value))}%`} />)}
       </div>
     </ReportCard>
   )
@@ -102,11 +120,11 @@ function ReportScoreCard({ item }) {
     </div>
   )
 }
-function CandidateReportRadarChart() {
+function CandidateReportRadarChart({ metrics }) {
   const center = 130
   const maxRadius = 88
-  const points = candidateReportData.radar.map((metric, index) => {
-    const angle = (Math.PI * 2 * index) / candidateReportData.radar.length - Math.PI / 2
+  const points = metrics.map((metric, index) => {
+    const angle = (Math.PI * 2 * index) / metrics.length - Math.PI / 2
     const radius = (metric.value / 100) * maxRadius
     return {
       ...metric,
@@ -123,9 +141,9 @@ function CandidateReportRadarChart() {
         {[0.25, 0.5, 0.75, 1].map((scale) => (
           <polygon
             key={scale}
-            points={candidateReportData.radar
+            points={metrics
               .map((_, index) => {
-                const angle = (Math.PI * 2 * index) / candidateReportData.radar.length - Math.PI / 2
+                const angle = (Math.PI * 2 * index) / metrics.length - Math.PI / 2
                 return `${center + Math.cos(angle) * maxRadius * scale},${center + Math.sin(angle) * maxRadius * scale}`
               })
               .join(' ')}
@@ -172,9 +190,9 @@ function CandidateReportRadarChart() {
     </ReportCard>
   )
 }
-function CandidateReportTimelineChart() {
-  const points = candidateReportData.timeline.map((item, index) => {
-    const x = 32 + index * 48
+function CandidateReportTimelineChart({ questions }) {
+  const points = questions.map((item, index) => {
+    const x = questions.length > 1 ? 32 + index * (232 / (questions.length - 1)) : 150
     const y = 160 - item.value * 1.2
     return { ...item, x, y }
   })
@@ -221,11 +239,11 @@ function CandidateReportTimelineChart() {
     </ReportCard>
   )
 }
-function QuestionWisePerformance() {
+function QuestionWisePerformance({ questions }) {
   return (
     <ReportCard title="Question-wise Performance" className="lg:col-span-2">
       <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
-        {candidateReportData.questions.map((item, index) => (
+        {questions.map((item, index) => (
           <div
             key={item.question}
             className="grid gap-3 border-b border-slate-200 p-4 last:border-b-0 md:grid-cols-[64px_1fr_120px]"
@@ -235,12 +253,12 @@ function QuestionWisePerformance() {
             </div>
             <div>
               <p className="text-sm font-black text-slate-950">{item.question}</p>
-              <p className="mt-1 text-sm leading-6 text-slate-600">{item.signal}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-600">{item.signal || 'No answer-level evaluation was returned for this question.'}</p>
             </div>
             <div>
-              <p className="text-right text-xl font-black text-slate-950">{item.score}</p>
+              <p className="text-right text-xl font-black text-slate-950">{item.score ?? '—'}</p>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-blue-700" style={{ width: `${item.score}%` }} />
+                <div className="h-full rounded-full bg-blue-700" style={{ width: `${item.score || 0}%` }} />
               </div>
             </div>
           </div>
@@ -268,12 +286,52 @@ function ReportInsightList({ title, items, icon: Icon, tone }) {
     </ReportCard>
   )
 }
+function buildReportData(summary, evaluation) {
+  const responses = Array.isArray(summary.responses) ? summary.responses : []
+  const gaze = summary.gazeMetrics || {}
+  const speechFluency = average(responses.map((response) => asScore(response?.speech?.fluency)))
+  const eyeContact = Number(gaze.lookingAtScreenPercentage) > 0 ? Math.round(gaze.lookingAtScreenPercentage) : null
+  const snapshot = [
+    { label: 'Overall score', value: asScore(evaluation?.overallScore), icon: Target, color: '#2563eb' },
+    { label: 'Technical knowledge', value: asScore(evaluation?.technicalKnowledge), icon: BrainCircuit, color: '#0f766e' },
+    { label: 'Communication', value: asScore(evaluation?.communication), icon: MessageSquareText, color: '#7c3aed' },
+    { label: 'Resume consistency', value: asScore(evaluation?.resumeConsistency), icon: CheckCircle2, color: '#0891b2' },
+    { label: 'Attention', value: asScore(evaluation?.attention), icon: Eye, color: '#059669' },
+    { label: 'Speech fluency', value: speechFluency, icon: Sparkles, color: '#d97706' },
+  ].filter((item) => item.value !== null)
+  const radar = [
+    ['Technical', evaluation?.technicalKnowledge],
+    ['Answer quality', evaluation?.answerQuality],
+    ['Resume', evaluation?.resumeConsistency],
+    ['Coverage', evaluation?.topicCoverage],
+    ['Communication', evaluation?.communication],
+    ['Attention', evaluation?.attention],
+  ].map(([label, value]) => ({ label, value: asScore(value) })).filter((item) => item.value !== null)
+  const questions = responses
+    .filter((response) => response?.type === 'main' || !response?.type)
+    .map((response) => {
+      const answerEvaluation = response.evaluation || {}
+      const score = average([
+        asScore(answerEvaluation.correctness),
+        asScore(answerEvaluation.relevance),
+        asScore(answerEvaluation.depth),
+      ])
+      return {
+        question: response.question || 'Interview question',
+        score,
+        signal: answerEvaluation.summary || (response.answer?.trim() ? 'Answer captured; no answer-level evaluation returned.' : 'No answer was submitted.'),
+        label: `Q${Number(response.questionIndex) + 1}`,
+      }
+    })
+  return { snapshot, radar, questions, eyeContact }
+}
 function CandidateReportPage({ candidate, onExit }) {
   const summary = readSessionObject('ai-interview-summary') || {}
   const evaluation = candidate.evaluation || readSessionObject('ai-interview-evaluation')
   const responses = Array.isArray(summary.responses) ? summary.responses : []
   const strengths = Array.isArray(evaluation?.strengths) ? evaluation.strengths : []
   const weaknesses = Array.isArray(evaluation?.weaknesses) ? evaluation.weaknesses : []
+  const report = buildReportData(summary, evaluation)
   return (
     <main className="dark-report min-h-screen bg-[#07111f] text-slate-100">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -324,7 +382,7 @@ function CandidateReportPage({ candidate, onExit }) {
                 {evaluation?.summary || 'Interview evaluation is unavailable.'}
               </p>
               <p className="mt-4 text-xs font-bold text-slate-500">
-                Generated: {candidateReportData.generatedAt} · Resume: {candidate.resumeName}
+                Completed: {formatReportDate(summary.completedAt)} · Resume: {candidate.resumeName || 'Unavailable'}
               </p>
             </div>
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
@@ -360,22 +418,14 @@ function CandidateReportPage({ candidate, onExit }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Performance snapshot</p>
-              <p className="mt-1 text-sm font-medium text-slate-500">A consistent view of capability signals from the completed session.</p>
+              <p className="mt-1 text-sm font-medium text-slate-500">Only metrics with sufficient interview evidence are displayed.</p>
             </div>
             <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">Interview complete</span>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {candidateReportData.scores.map((item) => <ReportScoreCard key={item.label} item={item} />)}
-          </div>
+          {report.snapshot.length > 0 ? <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{report.snapshot.map((item) => <ReportScoreCard key={item.label} item={item} />)}</div> : <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">A performance snapshot requires a completed backend evaluation. No score has been inferred from missing evidence.</p>}
         </section>
-        <div className="mt-5 grid gap-5 lg:grid-cols-2">
-          <CandidateReportRadarChart />
-          <CandidateReportTimelineChart />
-        </div>
-        <div className="mt-5 grid gap-5 lg:grid-cols-3">
-          <QuestionWisePerformance />
-          <ReportInsightList title="Practice focus" items={candidateReportData.suggestions} icon={Sparkles} tone="suggestion" />
-        </div>
+        {report.radar.length >= 3 && report.questions.length > 0 && <div className="mt-5 grid gap-5 lg:grid-cols-2"><CandidateReportRadarChart metrics={report.radar} /><CandidateReportTimelineChart questions={report.questions} /></div>}
+        {report.questions.length > 0 && <div className="mt-5"><QuestionWisePerformance questions={report.questions} /></div>}
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <ReportInsightList title="Strengths" items={strengths} icon={CheckCircle2} tone="strength" />
           <ReportInsightList title="Areas to Improve" items={weaknesses} icon={FileWarning} tone="weakness" />

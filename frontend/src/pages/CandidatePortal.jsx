@@ -65,7 +65,22 @@ function CandidatePortalShell({ children, step, onExit }) {
     </main>
   )
 }
-function PortalCard({ eyebrow, title, description, children }) {
+function PortalCard({ eyebrow, title, description, children, wide = false }) {
+  if (wide) {
+    return (
+      <section className="mx-auto w-full max-w-6xl overflow-hidden rounded-3xl border border-white/10 bg-slate-900/55 shadow-[0_35px_120px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-7">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-200">{eyebrow}</p>
+            <h1 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl">{title}</h1>
+            <p className="mt-1 text-sm text-slate-400">{description}</p>
+          </div>
+          <span className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-bold text-slate-300">Secure device verification</span>
+        </header>
+        <div className="p-5 sm:p-7">{children}</div>
+      </section>
+    )
+  }
   return (
     <section className="w-full max-w-5xl min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.07] shadow-[0_35px_120px_rgba(0,0,0,0.36)] backdrop-blur-2xl">
       <div className="grid min-w-0 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
@@ -211,7 +226,7 @@ function CameraPreview({ stream, checks }) {
   }, [stream])
   const previewActive = checks.preview.status === 'passed'
   return (
-    <div className="relative aspect-video min-h-[230px] overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827)] sm:min-h-[280px]">
+    <div className="relative isolate aspect-[16/10] w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_50%_20%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,#020617,#111827)]">
       <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 text-xs font-black text-white backdrop-blur">
         <span className={`h-2 w-2 rounded-full ${previewActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         Camera preview
@@ -219,7 +234,7 @@ function CameraPreview({ stream, checks }) {
       {stream ? (
         <video
           ref={videoRef}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 block h-full w-full max-w-none object-cover"
           autoPlay
           muted
           playsInline
@@ -232,15 +247,15 @@ function CameraPreview({ stream, checks }) {
           <div className="absolute bottom-8 left-1/2 h-28 w-44 -translate-x-1/2 rounded-t-[4rem] border border-cyan-200/20 bg-slate-300/10" />
         </>
       )}
-      <div className="absolute bottom-4 left-4 right-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="absolute bottom-3 left-3 right-3 grid min-w-0 grid-cols-3 gap-1.5 sm:bottom-4 sm:left-4 sm:right-4 sm:gap-2">
         {[
           ['Face', checks.face.status === 'passed' ? 'Passed' : 'Needs attention', checks.face.status],
           ['Lighting', checks.lighting.status === 'passed' ? 'Passed' : 'Not required', checks.lighting.status],
           ['Audio', checks.audioInput.status === 'passed' ? 'Passed' : 'Needs attention', checks.audioInput.status],
         ].map(([label, value, status]) => (
-          <div key={label} className="rounded-xl bg-white/10 px-3 py-2 text-center backdrop-blur">
-            <p className="text-xs font-black text-white">{label}</p>
-            <p className={`mt-1 text-[11px] font-bold ${status === 'passed' ? 'text-emerald-300' : 'text-amber-300'}`}>
+          <div key={label} className="min-w-0 rounded-xl bg-white/10 px-1.5 py-1.5 text-center backdrop-blur sm:px-3 sm:py-2">
+            <p className="truncate text-[10px] font-black text-white sm:text-xs">{label}</p>
+            <p className={`mt-0.5 truncate text-[9px] font-bold sm:mt-1 sm:text-[11px] ${status === 'passed' ? 'text-emerald-300' : 'text-amber-300'}`}>
               {value}
             </p>
           </div>
@@ -270,13 +285,14 @@ function SystemCheck({ candidate, onContinue }) {
 
   return (
     <PortalCard
-      eyebrow="Step 02"
+      wide
+      eyebrow="Step 02 of 04 · Device readiness"
       title="System Check"
-      description="The interview platform verifies available browser device signals before the assessment starts."
+      description="Confirm your camera, microphone, and browser access before the interview begins."
     >
-      <div className="min-w-0 space-y-5">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)]">
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 sm:p-4">
-          <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Camera preview</p>
+          <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-sm font-black text-white">Camera preview</p><p className="mt-1 text-xs font-semibold text-slate-500">Keep your face within the frame.</p></div><span className="rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Private</span></div>
           <CameraPreview stream={cameraStream} checks={checks} />
         </div>
         <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 sm:p-4">
