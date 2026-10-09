@@ -533,7 +533,9 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
       && speechMetrics.questionIndex === currentQuestionIndex
       && speechMetrics.type === responseType
     ) {
-      const { questionIndex: _questionIndex, type: _type, ...speech } = speechMetrics
+      const speech = { ...speechMetrics }
+      delete speech.questionIndex
+      delete speech.type
       response.speech = speech
     }
     nextResponses.push(response)

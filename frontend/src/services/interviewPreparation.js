@@ -13,12 +13,7 @@ export async function prepareInterviewQuestions(resumeFile) {
     body: formData,
   })
 
-  let payload = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
+  const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
     throw new Error(payload?.message || 'Failed to prepare interview questions.')

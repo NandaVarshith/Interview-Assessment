@@ -508,6 +508,8 @@ function CandidatePortal({ onExit }) {
     return () => {
       cancelled = true
     }
+  // The effect intentionally starts only once when the waiting room opens.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidate, step])
 
   const retryPreparation = () => {

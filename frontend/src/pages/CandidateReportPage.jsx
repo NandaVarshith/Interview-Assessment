@@ -275,13 +275,13 @@ function CandidateReportPage({ candidate, onExit }) {
   const strengths = Array.isArray(evaluation?.strengths) ? evaluation.strengths : []
   const weaknesses = Array.isArray(evaluation?.weaknesses) ? evaluation.weaknesses : []
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-950">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_10%_0%,#dbeafe_0%,transparent_28%),linear-gradient(180deg,#f8fbff_0%,#f1f5f9_100%)] text-slate-950">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <header className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">
-                Candidate Report
+              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-blue-700">
+                <Sparkles size={14} /> Candidate Report
               </p>
               <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-950">
                 {candidate.name}
@@ -298,7 +298,7 @@ function CandidateReportPage({ candidate, onExit }) {
               >
                 Back to Site
               </Button>
-              <Button className="bg-slate-950 text-white hover:bg-slate-800" onClick={() => window.print()}>
+              <Button onClick={() => window.print()}>
                 <FileBarChart size={17} />
                 Download PDF
               </Button>
@@ -356,6 +356,26 @@ function CandidateReportPage({ candidate, onExit }) {
             <p className="mt-4 text-sm leading-7 text-slate-700">{evaluation.summary}</p>
           </section>
         )}
+        <section className="mt-5 rounded-3xl border border-slate-200/90 bg-white/90 p-5 shadow-sm backdrop-blur sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">Performance snapshot</p>
+              <p className="mt-1 text-sm font-medium text-slate-500">A consistent view of capability signals from the completed session.</p>
+            </div>
+            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700">Interview complete</span>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {candidateReportData.scores.map((item) => <ReportScoreCard key={item.label} item={item} />)}
+          </div>
+        </section>
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <CandidateReportRadarChart />
+          <CandidateReportTimelineChart />
+        </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          <QuestionWisePerformance />
+          <ReportInsightList title="Practice focus" items={candidateReportData.suggestions} icon={Sparkles} tone="suggestion" />
+        </div>
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <ReportInsightList title="Strengths" items={strengths} icon={CheckCircle2} tone="strength" />
           <ReportInsightList title="Areas to Improve" items={weaknesses} icon={FileWarning} tone="weakness" />
