@@ -547,6 +547,7 @@ function CandidatePortal({ onExit }) {
           }
           // Completing an interview must never wait for a slow or unavailable API.
           // Show the report immediately, then enrich it when evaluation returns.
+          window.sessionStorage.removeItem('ai-interview-evaluation')
           setCandidate((current) => ({ ...current, responses, evaluation: null }))
           setStep(4)
           void (async () => {
