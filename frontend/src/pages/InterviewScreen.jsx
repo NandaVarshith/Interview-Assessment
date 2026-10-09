@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   BrainCircuit,
   Mic,
   MessageSquareText,
   Video,
+  Volume2,
+  VolumeX,
   Waves,
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -116,7 +118,11 @@ function AIInterviewerPanel({
   speechStatus,
   followUpError,
   answerDisabled,
+  speechEnabled,
+  onSpeakQuestion,
+  onToggleSpeech,
 }) {
+  const question = crossQuestion || followUpQuestion || interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'
   return (
     <aside className="flex min-h-0 min-w-0 flex-col gap-4 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] backdrop-blur-2xl">
       <div className="rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-4">
@@ -136,9 +142,9 @@ function AIInterviewerPanel({
         </div>
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-        <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Current Question</p>
+        <div className="flex items-center justify-between gap-3"><p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Current Question</p><div className="flex items-center gap-1"><Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-cyan-200 hover:bg-cyan-300/10 hover:text-cyan-100" aria-label="Read question aloud" title="Read question aloud" onClick={onSpeakQuestion}><Volume2 size={17} /></Button><Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:bg-white/10 hover:text-white" aria-label={speechEnabled ? 'Mute automatic question reading' : 'Enable automatic question reading'} title={speechEnabled ? 'Mute automatic question reading' : 'Enable automatic question reading'} onClick={onToggleSpeech}>{speechEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}</Button></div></div>
         <h2 className="mt-3 break-words text-xl font-black leading-8 tracking-tight text-white">
-          {crossQuestion || followUpQuestion || interviewQuestions[questionIndex] || 'Questions will appear here once they are ready.'}
+          {question}
         </h2>
         <label className="mt-5 block">
           <span className="text-xs font-black uppercase tracking-[0.16em] text-cyan-200">Your Answer</span>
@@ -301,6 +307,7 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const [isRecording, setIsRecording] = useState(false)
   const [speechStatus, setSpeechStatus] = useState('')
   const [speechMetrics, setSpeechMetrics] = useState(null)
+  const [questionSpeechEnabled, setQuestionSpeechEnabled] = useState(true)
   const [cameraReady, setCameraReady] = useState(false)
   const gazeVideoRef = useRef(null)
   const gazeCanvasRef = useRef(null)
@@ -320,6 +327,25 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
   const recordingStartedAtRef = useRef(0)
   const currentQuestionIndex = Math.min(questionIndex, Math.max(questionCount - 1, 0))
   const progress = questionCount > 0 ? ((currentQuestionIndex + 1) / questionCount) * 100 : 0
+  const currentPrompt = crossQuestion || followUpQuestion || interviewQuestions[currentQuestionIndex] || ''
+
+  const speakCurrentQuestion = useCallback(() => {
+    if (!currentPrompt || !('speechSynthesis' in window)) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(currentPrompt)
+    utterance.rate = 0.95
+    utterance.pitch = 1
+    window.speechSynthesis.speak(utterance)
+  }, [currentPrompt])
+
+  useEffect(() => {
+    if (!questionSpeechEnabled || !currentPrompt || !('speechSynthesis' in window)) return undefined
+    const timer = window.setTimeout(speakCurrentQuestion, 180)
+    return () => {
+      window.clearTimeout(timer)
+      window.speechSynthesis.cancel()
+    }
+  }, [currentPrompt, questionSpeechEnabled, speakCurrentQuestion])
 
   const getGazeMetrics = () => {
     const counts = gazeCountsRef.current
@@ -808,6 +834,12 @@ function InterviewScreen({ candidate, onExit, onFinish }) {
           speechStatus={speechStatus}
           followUpError={followUpError}
           answerDisabled={followUpLoading}
+          speechEnabled={questionSpeechEnabled}
+          onSpeakQuestion={speakCurrentQuestion}
+          onToggleSpeech={() => {
+            window.speechSynthesis?.cancel()
+            setQuestionSpeechEnabled((enabled) => !enabled)
+          }}
         />
         <WebcamInterviewPanel
           cameraOn={cameraReady}
